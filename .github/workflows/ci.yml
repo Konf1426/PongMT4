@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  
+  checks:
+    name: Vérifications projet
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Cohérence des fichiers .meta
+        run: |
+          echo "Recherche d'assets SANS fichier .meta..."
+          missing=0
+          while IFS= read -r f; do
+            case "$f" in
+              *.meta) continue ;;            # on ignore les .meta eux-mêmes
+            esac
+            if [ ! -e "$f.meta" ]; then
+              echo ".meta manquant pour : $f"
+              missing=1
+            fi
+          done < <(find Assets -mindepth 1 \( -type f -o -type d \))
+
+          echo "Recherche de fichiers .meta ORPHELINS (sans asset)..."
+          while IFS= read -r m; do
+            asset="${m%.meta}"
+            if [ ! -e "$asset" ]; then
+              echo ".meta orphelin (asset manquant) : $m"
+              missing=1
+            fi
+          done < <(find Assets -name "*.meta")
+
+          if [ "$missing" -eq 1 ]; then
+            echo " Incohérences détectées (voir ci-dessus)."
+            exit 1
+          fi
+          echo "Tous les assets ont leur .meta, aucun orphelin."
+
+      - name: Présence des fichiers clés du projet
+        run: |
+          for f in ProjectSettings/ProjectVersion.txt Packages/manifest.json Assets/Pong/Pong.unity; do
+            if [ ! -f "$f" ]; then
+              echo "Fichier attendu manquant : $f"
+              exit 1
+            fi
+            echo "$f"
+          done
+          echo "Version Unity du projet :"
+          cat ProjectSettings/ProjectVersion.txt
+

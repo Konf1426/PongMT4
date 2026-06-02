@@ -11,6 +11,10 @@ public class PongCircleGame : MonoBehaviour
 {
     public int PlayerCount = 4;
     public int MinimumPlayers = 4;
+    public int MaximumPlayers = 10;
+    public bool MouseControlEnabled = false;
+    public int LocalPlayerIndex = 0;
+    public float StartCountdownDuration = 3f;
     public bool PreviewInEditMode = true;
     public float ArenaRadius = 5;
     public float SectorAlpha = 0.22f;
@@ -55,6 +59,7 @@ public class PongCircleGame : MonoBehaviour
     }
 
     readonly List<CirclePlayer> players = new List<CirclePlayer>();
+    readonly List<PlayerProfile> profiles = new List<PlayerProfile>();
     readonly List<GameObject> generatedObjects = new List<GameObject>();
     readonly List<GameObject> hiddenClassicObjects = new List<GameObject>();
 
@@ -62,6 +67,8 @@ public class PongCircleGame : MonoBehaviour
     Vector3 ballStartPosition;
     bool gameStarted;
     bool gameOver;
+    bool countdownActive;
+    float countdownRemaining;
     int winnerId;
     string status = "Playing";
 
@@ -80,6 +87,10 @@ public class PongCircleGame : MonoBehaviour
     }
 
     void OnValidate() {
+      MinimumPlayers = Mathf.Max(1, MinimumPlayers);
+      MaximumPlayers = Mathf.Max(MinimumPlayers, MaximumPlayers);
+      PlayerCount = Mathf.Clamp(PlayerCount, MinimumPlayers, MaximumPlayers);
+
       if (!Application.isPlaying && isActiveAndEnabled) {
         ScheduleEditorPreview();
       }
@@ -105,7 +116,7 @@ public class PongCircleGame : MonoBehaviour
     void SetupGame() {
       FindOrCreateBall();
       DisableClassicPongControls();
-      PlayerCount = Mathf.Max(MinimumPlayers, PlayerCount);
+      PlayerCount = Mathf.Clamp(PlayerCount, MinimumPlayers, MaximumPlayers);
       BuildArena(PlayerCount);
 
       if (StartInLobby) {
@@ -120,13 +131,43 @@ public class PongCircleGame : MonoBehaviour
         return;
       }
 
+      if (!gameStarted && !gameOver) {
+        UpdateLobbyCountdown();
+      }
+
       UpdatePaddles();
       UpdateBall();
+    }
+
+    void UpdateLobbyCountdown() {
+      // Démarrage auto : 4 joueurs minimum ET tous prêts → compte à rebours.
+      if (!CanStart) {
+        if (countdownActive) {
+          countdownActive = false;
+          status = "Waiting for players";
+        }
+        return;
+      }
+
+      if (!countdownActive) {
+        countdownActive = true;
+        countdownRemaining = StartCountdownDuration;
+      }
+
+      countdownRemaining -= Time.deltaTime;
+      if (countdownRemaining <= 0f) {
+        countdownActive = false;
+        StartGame();
+        return;
+      }
+
+      status = "Starting in " + Mathf.CeilToInt(countdownRemaining) + "...";
     }
 
     public void EnterLobby() {
       gameStarted = false;
       gameOver = false;
+      countdownActive = false;
       winnerId = 0;
       status = "Waiting for players";
 
@@ -139,6 +180,7 @@ public class PongCircleGame : MonoBehaviour
     public void StartGame() {
       gameStarted = true;
       gameOver = false;
+      countdownActive = false;
       winnerId = 0;
       status = "Playing";
       ResetBall();
@@ -157,7 +199,7 @@ public class PongCircleGame : MonoBehaviour
 
       FindOrCreateBall();
       DisableClassicPongControls();
-      PlayerCount = Mathf.Max(MinimumPlayers, PlayerCount);
+      PlayerCount = Mathf.Clamp(PlayerCount, MinimumPlayers, MaximumPlayers);
       BuildArena(PlayerCount);
       ResetBall();
     }
@@ -226,7 +268,7 @@ public class PongCircleGame : MonoBehaviour
     }
 
     public void SetPlayerCount(int playerCount) {
-      PlayerCount = Mathf.Max(MinimumPlayers, playerCount);
+      PlayerCount = Mathf.Clamp(playerCount, MinimumPlayers, MaximumPlayers);
       BuildArena(PlayerCount);
 
       if (Application.isPlaying && StartInLobby) {
@@ -255,13 +297,14 @@ public class PongCircleGame : MonoBehaviour
       winnerId = 0;
       status = "Playing";
 
+      EnsureProfiles(playerCount);
       for (int i = 0; i < playerCount; i++) {
-        Color color = Color.HSVToRGB((float)i / playerCount, 0.75f, 1f);
-        color.a = SectorAlpha;
+        PlayerProfile profile = profiles[i];
 
         CirclePlayer player = new CirclePlayer();
         player.Id = i + 1;
-        player.Color = color;
+        player.Name = profile.Name;
+        player.Color = profile.Color;
         player.PaddleObject = CreatePaddle("Paddle_Player_" + player.Id, player.Color);
         players.Add(player);
       }
@@ -370,9 +413,18 @@ public class PongCircleGame : MonoBehaviour
 
       for (int i = 0; i < players.Count; i++) {
         CirclePlayer player = players[i];
-        float direction = ReadLocalDirection(i);
-        player.PaddleAngle += direction * PaddleAngularSpeed * Time.deltaTime;
-        player.PaddleAngle = ClampPaddleAngle(player.PaddleAngle, player.SectorStartAngle, player.SectorEndAngle);
+        if (!player.IsAlive) {
+          continue;
+        }
+
+        if (MouseControlEnabled && i == LocalPlayerIndex && TryReadMouseAngle(out float mouseAngle)) {
+          // Pointage absolu : la raquette suit l'angle de la souris, borné à son secteur.
+          player.PaddleAngle = ClampPaddleAngle(mouseAngle, player.SectorStartAngle, player.SectorEndAngle);
+        } else {
+          float direction = ReadLocalDirection(i);
+          player.PaddleAngle += direction * PaddleAngularSpeed * Time.deltaTime;
+          player.PaddleAngle = ClampPaddleAngle(player.PaddleAngle, player.SectorStartAngle, player.SectorEndAngle);
+        }
       }
 
       UpdatePaddleTransforms();
@@ -455,13 +507,13 @@ public class PongCircleGame : MonoBehaviour
       }
 
       int aliveCount = CountAlivePlayers();
-      Debug.Log("Player " + player.Id + " eliminated. Alive players: " + aliveCount);
+      // Debug.Log(player.Name + " eliminated. Alive players: " + aliveCount);
 
       if (aliveCount <= 1) {
         CirclePlayer winner = FindLastAlivePlayer();
         winnerId = winner != null ? winner.Id : 0;
         gameOver = true;
-        status = winnerId > 0 ? "Player " + winnerId + " wins!" : "No winner";
+        status = winner != null ? winner.Name + " wins!" : "No winner";
 
         if (Ball != null) {
           Ball.SetActive(false);
@@ -472,7 +524,7 @@ public class PongCircleGame : MonoBehaviour
       }
 
       RedistributeAlivePlayers();
-      status = "Player " + player.Id + " eliminated";
+      status = player.Name + " eliminated";
       ResetBall();
     }
 
@@ -672,9 +724,183 @@ public class PongCircleGame : MonoBehaviour
       }
     }
 
+    void EnsureProfiles(int count) {
+      while (profiles.Count < count) {
+        int index = profiles.Count;
+        Color color = Color.HSVToRGB((float)index / Mathf.Max(1, MaximumPlayers), 0.75f, 1f);
+        color.a = SectorAlpha;
+        profiles.Add(new PlayerProfile {
+          Name = "Player " + (index + 1),
+          Color = color
+        });
+      }
+    }
+
+    public List<PlayerInfo> GetPlayerInfos() {
+      List<PlayerInfo> infos = new List<PlayerInfo>();
+      foreach (CirclePlayer player in players) {
+        infos.Add(new PlayerInfo {
+          Id = player.Id,
+          Name = player.Name,
+          Color = player.Color,
+          IsAlive = player.IsAlive
+        });
+      }
+
+      return infos;
+    }
+
+    public string GetPlayerName(int id) {
+      foreach (CirclePlayer player in players) {
+        if (player.Id == id) {
+          return player.Name;
+        }
+      }
+
+      return "Player " + id;
+    }
+
+    public void SetPlayerName(int index, string name) {
+      if (index < 0 || index >= players.Count) {
+        return;
+      }
+
+      players[index].Name = name;
+      if (index < profiles.Count) {
+        profiles[index].Name = name;
+      }
+    }
+
+    public void CyclePlayerColor(int index) {
+      if (index < 0 || index >= players.Count) {
+        return;
+      }
+
+      CirclePlayer player = players[index];
+      Color.RGBToHSV(player.Color, out float h, out float s, out float v);
+
+      // On avance la teinte jusqu'à en trouver une libre (pas trop proche d'un autre joueur).
+      float hue = FindFreeHue(h, index);
+      Color color = Color.HSVToRGB(hue, 0.75f, 1f);
+      color.a = SectorAlpha;
+
+      player.Color = color;
+      if (index < profiles.Count) {
+        profiles[index].Color = color;
+      }
+
+      ApplyPlayerColor(player);
+    }
+
+    // Couleurs uniques : deux joueurs ne peuvent pas avoir une teinte (presque) identique.
+    const float MinHueDistance = 0.04f;
+
+    float FindFreeHue(float startHue, int excludeIndex) {
+      const float step = 0.08f;
+      float hue = startHue;
+      for (int attempt = 0; attempt < 32; attempt++) {
+        hue = Mathf.Repeat(hue + step, 1f);
+        if (IsHueFree(hue, excludeIndex)) {
+          return hue;
+        }
+      }
+
+      return Mathf.Repeat(startHue + step, 1f);
+    }
+
+    bool IsHueFree(float hue, int excludeIndex) {
+      for (int i = 0; i < players.Count; i++) {
+        if (i == excludeIndex) {
+          continue;
+        }
+
+        Color.RGBToHSV(players[i].Color, out float otherHue, out float s, out float v);
+        float distance = Mathf.Abs(Mathf.DeltaAngle(hue * 360f, otherHue * 360f)) / 360f;
+        if (distance < MinHueDistance) {
+          return false;
+        }
+      }
+
+      return true;
+    }
+
+    public bool CanStart {
+      get {
+        return CurrentPlayerCount >= MinimumPlayers;
+      }
+    }
+
+    public bool IsCountingDown {
+      get {
+        return countdownActive;
+      }
+    }
+
+    public int CountdownSeconds {
+      get {
+        return Mathf.CeilToInt(Mathf.Max(0f, countdownRemaining));
+      }
+    }
+
+    void ApplyPlayerColor(CirclePlayer player) {
+      if (player.PaddleObject != null) {
+        Renderer renderer = player.PaddleObject.GetComponent<Renderer>();
+        if (renderer != null) {
+          renderer.material = CreateMaterial(new Color(player.Color.r, player.Color.g, player.Color.b, 1));
+        }
+      }
+
+      if (player.SectorObject != null) {
+        Renderer renderer = player.SectorObject.GetComponent<Renderer>();
+        if (renderer != null) {
+          renderer.material = CreateMaterial(player.Color);
+        }
+      }
+    }
+
+    bool TryReadMouseAngle(out float angle) {
+      angle = 0;
+
+      Mouse mouse = Mouse.current;
+      Camera camera = Camera.main;
+      if (mouse == null || camera == null) {
+        return false;
+      }
+
+      Vector2 screenPosition = mouse.position.ReadValue();
+      Ray ray = camera.ScreenPointToRay(screenPosition);
+      Plane arenaPlane = new Plane(Vector3.forward, Vector3.zero);
+      if (!arenaPlane.Raycast(ray, out float distance)) {
+        return false;
+      }
+
+      Vector3 world = ray.GetPoint(distance);
+      if (new Vector2(world.x, world.y).sqrMagnitude < 0.0001f) {
+        return false;
+      }
+
+      angle = DirectionToAngle(world);
+      return true;
+    }
+
+    public struct PlayerInfo
+    {
+      public int Id;
+      public string Name;
+      public Color Color;
+      public bool IsAlive;
+    }
+
+    class PlayerProfile
+    {
+      public string Name;
+      public Color Color;
+    }
+
     class CirclePlayer
     {
       public int Id;
+      public string Name;
       public int SectorIndex;
       public int Score;
       public bool IsAlive = true;

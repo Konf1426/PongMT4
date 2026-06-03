@@ -1,0 +1,12 @@
+{
+  "name": "pong-circle-websocket-server",
+  "version": "1.0.0",
+  "private": true,
+  "type": "commonjs",
+  "scripts": {
+    "start": "node pong-websocket-server.js"
+  },
+  "dependencies": {
+    "ws": "^8.17.0"
+  }
+}

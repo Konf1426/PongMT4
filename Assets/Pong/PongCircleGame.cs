@@ -12,7 +12,7 @@ public class PongCircleGame : MonoBehaviour
     public int PlayerCount = 4;
     public int MinimumPlayers = 4;
     public int MaximumPlayers = 10;
-    public bool MouseControlEnabled = false;
+    public bool MouseControlEnabled = true;
     public int LocalPlayerIndex = 0;
     public float StartCountdownDuration = 3f;
     public bool PreviewInEditMode = true;

@@ -9,8 +9,8 @@ using UnityEditor;
 [ExecuteAlways]
 public class PongCircleGame : MonoBehaviour
 {
-    public int PlayerCount = 4;
-    public int MinimumPlayers = 4;
+    public int PlayerCount = 2;
+    public int MinimumPlayers = 2;
     public int MaximumPlayers = 10;
     public bool MouseControlEnabled = true;
     public int LocalPlayerIndex = 0;
@@ -26,6 +26,7 @@ public class PongCircleGame : MonoBehaviour
     public float PaddleAimInfluence = 0.45f;
     public bool StartInLobby = true;
     public bool HideClassicPongObjects = true;
+    public bool NetworkControlled = false;
     public GameObject Ball;
 
     public int CurrentPlayerCount {
@@ -135,8 +136,15 @@ public class PongCircleGame : MonoBehaviour
         UpdateLobbyCountdown();
       }
 
-      UpdatePaddles();
-      UpdateBall();
+      // En réseau, le serveur fait autorité : pas de simulation locale.
+      if (!NetworkControlled) {
+        UpdatePaddles();
+        UpdateBall();
+      }
+    }
+
+    public void SetNetworkControlled(bool networkControlled) {
+      NetworkControlled = networkControlled;
     }
 
     void UpdateLobbyCountdown() {
@@ -289,6 +297,48 @@ public class PongCircleGame : MonoBehaviour
     public void Replay() {
       BuildArena(PlayerCount);
       EnterLobby();
+    }
+
+    public void ApplyNetworkSnapshot(PongCircleNetworkSnapshot snapshot) {
+      if (snapshot == null) {
+        return;
+      }
+
+      NetworkControlled = true;
+
+      int snapshotPlayerCount = Mathf.Clamp(snapshot.playerCount, MinimumPlayers, MaximumPlayers);
+      if (players.Count != snapshotPlayerCount) {
+        PlayerCount = snapshotPlayerCount;
+        BuildArena(PlayerCount);
+      }
+
+      gameStarted = snapshot.gameStarted;
+      gameOver = snapshot.gameOver;
+      winnerId = snapshot.winnerId;
+      status = string.IsNullOrEmpty(snapshot.status) ? "Network sync" : snapshot.status;
+
+      if (snapshot.players != null) {
+        foreach (PongCircleNetworkPlayerState playerState in snapshot.players) {
+          CirclePlayer player = FindPlayerById(playerState.id);
+          if (player == null) {
+            continue;
+          }
+
+          player.IsAlive = playerState.alive;
+          player.PaddleAngle = playerState.paddleAngle;
+          player.HasPaddleAngle = true;
+          if (player.PaddleObject != null) {
+            player.PaddleObject.SetActive(player.IsAlive);
+          }
+        }
+      }
+
+      RedistributeAlivePlayers();
+
+      if (Ball != null) {
+        Ball.SetActive(gameStarted && !gameOver);
+        Ball.transform.position = new Vector3(snapshot.ballX, snapshot.ballY, ballStartPosition.z);
+      }
     }
 
     void BuildArena(int playerCount) {
@@ -640,6 +690,16 @@ public class PongCircleGame : MonoBehaviour
     CirclePlayer FindLastAlivePlayer() {
       foreach (CirclePlayer player in players) {
         if (player.IsAlive) {
+          return player;
+        }
+      }
+
+      return null;
+    }
+
+    CirclePlayer FindPlayerById(int playerId) {
+      foreach (CirclePlayer player in players) {
+        if (player.Id == playerId) {
           return player;
         }
       }

@@ -702,8 +702,9 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: c26e7c8d3b6fbd945b96db752bb858f3, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PongCircleGame
-  PlayerCount: 4
-  MinimumPlayers: 4
+  PlayerCount: 2
+  MinimumPlayers: 2
+  MaximumPlayers: 10
   PreviewInEditMode: 1
   ArenaRadius: 5
   SectorAlpha: 0.22

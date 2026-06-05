@@ -1,0 +1,757 @@
+const dgram = require("dgram");
+const http = require("http");
+
+const UDP_PORT = Number(process.env.UDP_PORT || 41234);
+const HEALTH_PORT = Number(process.env.UDP_HEALTH_PORT || 8082);
+const SERVER_VERSION = "udp-authoritative-2026-06-03-01";
+
+const arenaRadius = 5;
+const paddleArcDegrees = 22;
+const paddleAngularSpeed = 120;
+const ballSpeed = 3.5;
+const paddleAimInfluence = 0.45;
+const minimumPlayers = 2;
+const maximumPlayers = 10;
+const clientTimeoutMs = 10000;
+
+const socket = dgram.createSocket("udp4");
+const clientsByDevice = new Map();
+const clientsByAddress = new Map();
+
+const game = {
+  playerCount: minimumPlayers,
+  connectedPlayerCount: 0,
+  readyPlayerCount: 0,
+  players: [],
+  ballX: 0,
+  ballY: 0,
+  ballDirX: 1,
+  ballDirY: 0,
+  lobbyOpen: false,
+  gameStarted: false,
+  gameOver: false,
+  replayVoteCount: 0,
+  postGameDeadline: 0,
+  winnerId: 0,
+  status: "Waiting for someone to start a game"
+};
+
+let nextClientId = 1;
+let lastTick = Date.now();
+
+socket.on("message", (buffer, remote) => {
+  let envelope;
+  try {
+    envelope = JSON.parse(buffer.toString("utf8"));
+  } catch {
+    return;
+  }
+
+  const payload = envelope.payload || envelope;
+  const deviceId = sanitizeId(envelope.deviceId || payload.deviceId || "");
+  const deviceName = sanitizeDeviceName(envelope.deviceName || payload.deviceName || "");
+  if (!deviceId) {
+    return;
+  }
+
+  const client = registerClient(deviceId, deviceName, remote);
+
+  if (payload.type === "hello") {
+    sendSnapshot(client);
+    return;
+  }
+
+  if (payload.type === "join" || payload.type === "start") {
+    joinGame(client);
+    broadcastSnapshot();
+    return;
+  }
+
+  if (payload.type === "input") {
+    client.input = clamp(Number(payload.direction) || 0, -1, 1);
+    client.lastSeen = Date.now();
+    return;
+  }
+
+  if (payload.type === "restart") {
+    resetToLobby(client);
+    broadcastSnapshot();
+    return;
+  }
+
+  if (payload.type === "replay") {
+    voteReplay(client);
+    broadcastSnapshot();
+    return;
+  }
+
+  if (payload.type === "lobby") {
+    returnToLobby();
+    broadcastSnapshot();
+  }
+});
+
+socket.on("listening", () => {
+  const address = socket.address();
+  console.log(`Pong UDP server listening on udp://${address.address}:${address.port}`);
+  console.log(`Health listening on http://0.0.0.0:${HEALTH_PORT}/health`);
+});
+
+socket.bind(UDP_PORT, "0.0.0.0");
+
+http.createServer((req, res) => {
+  if (req.url.split("?")[0] !== "/health") {
+    res.writeHead(404);
+    res.end("Not found");
+    return;
+  }
+
+  reconcileGameState();
+  res.writeHead(200, { "Content-Type": "application/json; charset=utf-8" });
+  res.end(JSON.stringify({
+    ok: true,
+    transport: "udp",
+    version: SERVER_VERSION,
+    udpPort: UDP_PORT,
+    connectedPlayerCount: game.connectedPlayerCount,
+    readyPlayerCount: game.readyPlayerCount,
+    playerCount: game.playerCount,
+    lobbyOpen: game.lobbyOpen,
+    gameStarted: game.gameStarted,
+    gameOver: game.gameOver,
+    winnerId: game.winnerId,
+    status: game.status,
+    devices: buildDeviceList(),
+    lobbyDevices: buildLobbyDeviceList()
+  }));
+}).listen(HEALTH_PORT, "0.0.0.0");
+
+function registerClient(deviceId, deviceName, remote) {
+  const addressKey = `${remote.address}:${remote.port}`;
+  let client = clientsByDevice.get(deviceId);
+
+  if (!client) {
+    client = {
+      id: nextClientId++,
+      deviceId,
+      deviceName: deviceName || "Device",
+      address: remote.address,
+      port: remote.port,
+      playerId: 0,
+      ready: false,
+      input: 0,
+      wantsReplay: false,
+      lastSeen: Date.now()
+    };
+    clientsByDevice.set(deviceId, client);
+  }
+
+  client.deviceName = getUniqueDeviceName(deviceName || client.deviceName, client);
+  client.address = remote.address;
+  client.port = remote.port;
+  client.lastSeen = Date.now();
+  clientsByAddress.set(addressKey, client);
+  updateStatus();
+  return client;
+}
+
+function sanitizeId(value) {
+  return String(value || "").replace(/[^\w.-]/g, "").slice(0, 80);
+}
+
+function getUniqueDeviceName(deviceName, currentClient) {
+  const baseName = sanitizeDeviceName(deviceName) || "Device";
+  let sameTypeCount = 0;
+
+  for (const client of clientsByDevice.values()) {
+    if (client !== currentClient && sanitizeDeviceName(client.deviceName) === baseName) {
+      sameTypeCount++;
+    }
+  }
+
+  return sameTypeCount > 0 ? `${baseName} ${sameTypeCount + 1}` : baseName;
+}
+
+function sanitizeDeviceName(deviceName) {
+  return String(deviceName || "")
+    .replace(/[^\w .-]/g, "")
+    .trim()
+    .slice(0, 24);
+}
+
+function joinGame(client) {
+  if (!client || game.gameOver) {
+    return;
+  }
+
+  if (client.playerId <= 0 && getReadyClients().length >= maximumPlayers) {
+    return;
+  }
+
+  client.ready = true;
+
+  if (game.gameStarted && !game.gameOver) {
+    addReadyPlayerToRunningGame(client);
+    return;
+  }
+
+  game.lobbyOpen = true;
+  game.gameStarted = false;
+  game.gameOver = false;
+  game.replayVoteCount = 0;
+  game.postGameDeadline = 0;
+  game.winnerId = 0;
+  assignLobbyPlayers();
+}
+
+function addReadyPlayerToRunningGame() {
+  const activeClients = getReadyClients();
+  const previousPlayerCount = game.players.length;
+  activeClients.forEach((readyClient, index) => {
+    readyClient.playerId = index + 1;
+  });
+
+  rebuildPlayersForReadyClients(activeClients, true);
+  if (game.players.length > previousPlayerCount) {
+    for (let i = previousPlayerCount; i < game.players.length; i++) {
+      game.players[i].alive = true;
+      game.players[i].hasPaddleAngle = false;
+    }
+  }
+
+  redistributeAlivePlayers();
+  updateStatus();
+}
+
+function resetToLobby(requestingClient) {
+  for (const client of clientsByDevice.values()) {
+    client.ready = false;
+    client.input = 0;
+  }
+
+  if (requestingClient) {
+    requestingClient.ready = true;
+  }
+
+  game.lobbyOpen = true;
+  game.gameStarted = false;
+  game.gameOver = false;
+  game.replayVoteCount = 0;
+  game.postGameDeadline = 0;
+  game.winnerId = 0;
+  assignLobbyPlayers();
+}
+
+function returnToLobby() {
+  for (const client of clientsByDevice.values()) {
+    client.ready = false;
+    client.input = 0;
+    client.wantsReplay = false;
+    client.playerId = 0;
+  }
+
+  game.lobbyOpen = false;
+  game.gameStarted = false;
+  game.gameOver = false;
+  game.replayVoteCount = 0;
+  game.postGameDeadline = 0;
+  game.winnerId = 0;
+  assignLobbyPlayers();
+}
+
+function assignLobbyPlayers() {
+  const readyClients = getReadyClients();
+
+  for (const client of clientsByDevice.values()) {
+    client.playerId = 0;
+    client.input = 0;
+  }
+
+  game.connectedPlayerCount = 0;
+  game.readyPlayerCount = readyClients.length;
+  game.playerCount = Math.max(minimumPlayers, Math.min(maximumPlayers, readyClients.length));
+  rebuildPlayersForReadyClients(readyClients, false);
+
+  if (game.lobbyOpen) {
+    readyClients.forEach((client, index) => {
+      client.playerId = index + 1;
+    });
+  }
+
+  redistributeAlivePlayers();
+  resetBall();
+  updateStatus();
+
+  if (game.lobbyOpen && readyClients.length >= minimumPlayers) {
+    beginMatch();
+  }
+}
+
+function beginMatch() {
+  game.lobbyOpen = true;
+  game.gameStarted = true;
+  game.gameOver = false;
+  game.replayVoteCount = 0;
+  game.postGameDeadline = 0;
+  game.winnerId = 0;
+  game.status = "Playing";
+
+  for (const player of game.players) {
+    player.alive = true;
+    player.hasPaddleAngle = false;
+  }
+
+  for (const client of clientsByDevice.values()) {
+    client.wantsReplay = false;
+  }
+
+  redistributeAlivePlayers();
+  resetBall();
+  updateStatus();
+}
+
+function getConnectedClients() {
+  return Array.from(clientsByDevice.values())
+    .filter((client) => Date.now() - client.lastSeen <= clientTimeoutMs)
+    .sort((a, b) => a.id - b.id);
+}
+
+function getReadyClients() {
+  return getConnectedClients().filter((client) => client.ready).slice(0, maximumPlayers);
+}
+
+function rebuildPlayersForReadyClients(readyClients, preserveExistingPlayers) {
+  const previousPlayers = new Map();
+  if (preserveExistingPlayers) {
+    for (const player of game.players) {
+      previousPlayers.set(player.id, player);
+    }
+  }
+
+  game.playerCount = Math.max(minimumPlayers, Math.min(maximumPlayers, readyClients.length));
+  game.players = [];
+
+  for (let i = 0; i < game.playerCount; i++) {
+    const playerId = i + 1;
+    const existingPlayer = previousPlayers.get(playerId);
+    if (existingPlayer) {
+      game.players.push(existingPlayer);
+      continue;
+    }
+
+    game.players.push({
+      id: playerId,
+      alive: true,
+      hasPaddleAngle: false,
+      paddleAngle: 0,
+      input: 0,
+      sectorStartAngle: 0,
+      sectorEndAngle: 0
+    });
+  }
+}
+
+function voteReplay(client) {
+  if (!game.gameOver || !client || client.playerId <= 0) {
+    return;
+  }
+
+  client.wantsReplay = true;
+  game.replayVoteCount = countReplayVotes();
+  updatePostGameStatus();
+}
+
+function tick() {
+  const now = Date.now();
+  const deltaTime = Math.min(0.05, (now - lastTick) / 1000);
+  lastTick = now;
+
+  cleanupClients();
+  reconcileGameState();
+  updateInputs();
+  updatePostGameTimeout();
+  updatePaddles(deltaTime);
+  updateBall(deltaTime);
+}
+
+function cleanupClients() {
+  const now = Date.now();
+  for (const [deviceId, client] of clientsByDevice.entries()) {
+    if (now - client.lastSeen > clientTimeoutMs) {
+      clientsByDevice.delete(deviceId);
+    }
+  }
+}
+
+function reconcileGameState() {
+  if (game.gameOver) {
+    return;
+  }
+
+  const readyClients = getReadyClients();
+  if (!game.gameStarted && readyClients.length >= minimumPlayers) {
+    game.lobbyOpen = true;
+    assignLobbyPlayers();
+    return;
+  }
+
+  if (game.gameStarted) {
+    if (readyClients.length < minimumPlayers) {
+      returnToLobby();
+      return;
+    }
+
+    let changed = readyClients.length !== game.players.length;
+    readyClients.forEach((client, index) => {
+      const expectedPlayerId = index + 1;
+      if (client.playerId !== expectedPlayerId) {
+        client.playerId = expectedPlayerId;
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      rebuildPlayersForReadyClients(readyClients, true);
+      redistributeAlivePlayers();
+    }
+  }
+
+  updateStatus();
+}
+
+function updatePostGameTimeout() {
+  if (!game.gameOver || game.postGameDeadline <= 0) {
+    return;
+  }
+
+  if (Date.now() >= game.postGameDeadline) {
+    game.replayVoteCount = countReplayVotes();
+    if (game.replayVoteCount >= minimumPlayers) {
+      beginMatch();
+    } else {
+      returnToLobby();
+    }
+    broadcastSnapshot();
+  } else {
+    updatePostGameStatus();
+  }
+}
+
+function updateInputs() {
+  for (const player of game.players) {
+    player.input = 0;
+  }
+
+  for (const client of clientsByDevice.values()) {
+    const player = game.players[client.playerId - 1];
+    if (player) {
+      player.input = client.input;
+    }
+  }
+}
+
+function updatePaddles(deltaTime) {
+  if (!game.gameStarted || game.gameOver) {
+    return;
+  }
+
+  for (const player of game.players) {
+    if (!player.alive) {
+      continue;
+    }
+
+    player.paddleAngle += player.input * paddleAngularSpeed * deltaTime;
+    player.paddleAngle = clampPaddleAngle(player.paddleAngle, player.sectorStartAngle, player.sectorEndAngle);
+  }
+}
+
+function updateBall(deltaTime) {
+  if (!game.gameStarted || game.gameOver) {
+    return;
+  }
+
+  game.ballX += game.ballDirX * ballSpeed * deltaTime;
+  game.ballY += game.ballDirY * ballSpeed * deltaTime;
+
+  const radius = Math.hypot(game.ballX, game.ballY);
+  if (radius < arenaRadius) {
+    return;
+  }
+
+  const angle = directionToAngle(game.ballX, game.ballY);
+  const defender = findPlayerAtAngle(angle);
+  if (!defender || !defender.alive) {
+    resetBall();
+    return;
+  }
+
+  const paddleDelta = Math.abs(deltaAngle(angle, defender.paddleAngle));
+  if (paddleDelta <= paddleArcDegrees * 0.5) {
+    bounceOnPaddle(defender, angle);
+  } else {
+    eliminatePlayer(defender);
+  }
+}
+
+function updateStatus() {
+  game.connectedPlayerCount = countInGameDevices();
+  game.readyPlayerCount = countReadyDevices();
+
+  if (game.gameOver) {
+    return;
+  }
+
+  if (game.gameStarted) {
+    game.status = `Playing ${game.connectedPlayerCount}/${maximumPlayers} players`;
+    return;
+  }
+
+  if (game.lobbyOpen) {
+    game.status = `Lobby open: ${game.readyPlayerCount}/${minimumPlayers} ready, max ${maximumPlayers}`;
+    return;
+  }
+
+  game.status = "Waiting for someone to start a game";
+}
+
+function countInGameDevices() {
+  let count = 0;
+  for (const client of clientsByDevice.values()) {
+    if (client.ready && client.playerId > 0) {
+      count++;
+    }
+  }
+  return Math.min(count, maximumPlayers);
+}
+
+function countReadyDevices() {
+  return Math.min(getConnectedClients().filter((client) => client.ready).length, maximumPlayers);
+}
+
+function countReplayVotes() {
+  let count = 0;
+  for (const client of clientsByDevice.values()) {
+    if (client.playerId > 0 && client.wantsReplay) {
+      count++;
+    }
+  }
+  return count;
+}
+
+function bounceOnPaddle(defender, impactAngle) {
+  const impactDirection = angleToDirection(impactAngle);
+  const paddleDirection = angleToDirection(defender.paddleAngle);
+  const dot = game.ballDirX * paddleDirection.x + game.ballDirY * paddleDirection.y;
+  let reflectedX = game.ballDirX - 2 * dot * paddleDirection.x;
+  let reflectedY = game.ballDirY - 2 * dot * paddleDirection.y;
+
+  const offset = deltaAngle(defender.paddleAngle, impactAngle) / Math.max(1, paddleArcDegrees * 0.5);
+  const tangent = { x: -paddleDirection.y, y: paddleDirection.x };
+  let aimedX = reflectedX + tangent.x * offset * paddleAimInfluence;
+  let aimedY = reflectedY + tangent.y * offset * paddleAimInfluence;
+  let length = Math.hypot(aimedX, aimedY) || 1;
+  aimedX /= length;
+  aimedY /= length;
+
+  const antiImpactDot = aimedX * -impactDirection.x + aimedY * -impactDirection.y;
+  if (antiImpactDot < 0.15) {
+    aimedX = lerp(aimedX, -impactDirection.x, 0.5);
+    aimedY = lerp(aimedY, -impactDirection.y, 0.5);
+    length = Math.hypot(aimedX, aimedY) || 1;
+    aimedX /= length;
+    aimedY /= length;
+  }
+
+  game.ballDirX = aimedX;
+  game.ballDirY = aimedY;
+  game.ballX = impactDirection.x * (arenaRadius - 0.12);
+  game.ballY = impactDirection.y * (arenaRadius - 0.12);
+}
+
+function eliminatePlayer(player) {
+  player.alive = false;
+  const alivePlayers = game.players.filter((candidate) => candidate.alive);
+
+  if (alivePlayers.length <= 1) {
+    game.winnerId = alivePlayers[0] ? alivePlayers[0].id : 0;
+    game.gameOver = true;
+    game.gameStarted = false;
+    game.replayVoteCount = 0;
+    game.postGameDeadline = Date.now() + 30000;
+    for (const client of clientsByDevice.values()) {
+      client.wantsReplay = false;
+    }
+    updatePostGameStatus();
+    return;
+  }
+
+  game.status = `Player ${player.id} eliminated`;
+  redistributeAlivePlayers();
+  resetBall();
+}
+
+function updatePostGameStatus() {
+  if (!game.gameOver) {
+    return;
+  }
+
+  game.replayVoteCount = countReplayVotes();
+  const seconds = Math.max(0, Math.ceil((game.postGameDeadline - Date.now()) / 1000));
+  const winnerText = game.winnerId > 0 ? `Player ${game.winnerId} wins!` : "No winner";
+  game.status = `${winnerText} Replay ${game.replayVoteCount}/${minimumPlayers}, lobby in ${seconds}s`;
+}
+
+function redistributeAlivePlayers() {
+  const alivePlayers = game.players.filter((player) => player.alive);
+  if (alivePlayers.length === 0) {
+    return;
+  }
+
+  const sectorSize = 360 / alivePlayers.length;
+  alivePlayers.forEach((player, aliveIndex) => {
+    const sectorCenter = aliveIndex * sectorSize;
+    player.sectorStartAngle = sectorCenter - sectorSize * 0.5;
+    player.sectorEndAngle = sectorCenter + sectorSize * 0.5;
+
+    if (!player.hasPaddleAngle) {
+      player.paddleAngle = sectorCenter;
+      player.hasPaddleAngle = true;
+    } else {
+      player.paddleAngle = clampPaddleAngle(player.paddleAngle, player.sectorStartAngle, player.sectorEndAngle);
+    }
+  });
+}
+
+function findPlayerAtAngle(angle) {
+  return game.players.find((player) => angleInsideSector(angle, player.sectorStartAngle, player.sectorEndAngle));
+}
+
+function angleInsideSector(angle, startAngle, endAngle) {
+  const center = lerpAngle(startAngle, endAngle, 0.5);
+  const halfSize = Math.abs(deltaAngle(startAngle, endAngle)) * 0.5;
+  return Math.abs(deltaAngle(center, angle)) <= halfSize;
+}
+
+function resetBall() {
+  game.ballX = 0;
+  game.ballY = 0;
+  const angle = Math.random() * 360;
+  const direction = angleToDirection(angle);
+  game.ballDirX = direction.x;
+  game.ballDirY = direction.y;
+}
+
+function buildSnapshot(client) {
+  const alivePlayerCount = game.players.filter((player) => player.alive).length;
+  return {
+    type: "state",
+    localPlayerId: client ? client.playerId : 0,
+    lobbyOpen: game.lobbyOpen,
+    connectedPlayerCount: countInGameDevices(),
+    readyPlayerCount: countReadyDevices(),
+    playerCount: Math.max(minimumPlayers, Math.min(maximumPlayers, game.players.length)),
+    alivePlayerCount,
+    winnerId: game.winnerId,
+    gameStarted: game.gameStarted,
+    gameOver: game.gameOver,
+    replayVoteCount: game.replayVoteCount,
+    postGameRemainingSeconds: game.gameOver && game.postGameDeadline > 0
+      ? Math.max(0, Math.ceil((game.postGameDeadline - Date.now()) / 1000))
+      : 0,
+    status: game.status,
+    ballX: round(game.ballX),
+    ballY: round(game.ballY),
+    ballDirX: round(game.ballDirX),
+    ballDirY: round(game.ballDirY),
+    devices: buildDeviceList(),
+    lobbyDevices: buildLobbyDeviceList(),
+    players: game.players.map((player) => ({
+      id: player.id,
+      alive: player.alive,
+      paddleAngle: round(player.paddleAngle)
+    }))
+  };
+}
+
+function buildDeviceList() {
+  return Array.from(clientsByDevice.values())
+    .filter((client) => client.ready && client.playerId > 0)
+    .sort((a, b) => a.playerId - b.playerId)
+    .map((client) => ({
+      playerId: client.playerId,
+      name: client.deviceName || "Device",
+      ready: client.ready
+    }));
+}
+
+function buildLobbyDeviceList() {
+  return Array.from(clientsByDevice.values())
+    .filter((client) => !client.ready || client.playerId <= 0)
+    .sort((a, b) => a.id - b.id)
+    .map((client) => ({
+      playerId: 0,
+      name: client.deviceName || "Device",
+      ready: false
+    }));
+}
+
+function broadcastSnapshot() {
+  for (const client of clientsByDevice.values()) {
+    sendSnapshot(client);
+  }
+}
+
+function sendSnapshot(client) {
+  const message = Buffer.from(JSON.stringify(buildSnapshot(client)));
+  socket.send(message, client.port, client.address);
+}
+
+function angleToDirection(angle) {
+  const radians = angle * Math.PI / 180;
+  return { x: Math.cos(radians), y: Math.sin(radians) };
+}
+
+function directionToAngle(x, y) {
+  const angle = Math.atan2(y, x) * 180 / Math.PI;
+  return angle < 0 ? angle + 360 : angle;
+}
+
+function clampPaddleAngle(angle, startAngle, endAngle) {
+  const center = lerpAngle(startAngle, endAngle, 0.5);
+  const sectorHalfSize = Math.abs(deltaAngle(startAngle, endAngle)) * 0.5;
+  const allowedHalfSize = Math.max(0, sectorHalfSize - paddleArcDegrees * 0.5);
+  const delta = clamp(deltaAngle(center, angle), -allowedHalfSize, allowedHalfSize);
+  return center + delta;
+}
+
+function lerpAngle(a, b, t) {
+  return a + deltaAngle(a, b) * t;
+}
+
+function deltaAngle(current, target) {
+  let delta = repeat((target - current), 360);
+  if (delta > 180) {
+    delta -= 360;
+  }
+  return delta;
+}
+
+function repeat(value, length) {
+  return clamp(value - Math.floor(value / length) * length, 0, length);
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function round(value) {
+  return Math.round(value * 1000) / 1000;
+}
+
+assignLobbyPlayers();
+setInterval(tick, 1000 / 60);
+setInterval(broadcastSnapshot, 1000 / 30);

@@ -1,10 +1,11 @@
 {
-  "name": "pong-circle-websocket-server",
+  "name": "pong-circle-network-server",
   "version": "1.0.0",
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "start": "node pong-websocket-server.js"
+    "start": "node pong-websocket-server.js",
+    "start:udp": "node pong-udp-server.js"
   },
   "dependencies": {
     "ws": "^8.17.0"

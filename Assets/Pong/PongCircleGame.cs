@@ -215,20 +215,20 @@ public class PongCircleGame : MonoBehaviour
     void FindOrCreateBall() {
       if (Ball != null) {
         ballStartPosition = Ball.transform.position;
-        return;
+      } else {
+        PongBall pongBall = GameObject.FindFirstObjectByType<PongBall>();
+        if (pongBall != null) {
+          Ball = pongBall.gameObject;
+          ballStartPosition = Vector3.zero;
+        } else {
+          Ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+          Ball.name = "CircleBall";
+          Ball.transform.localScale = Vector3.one * 0.35f;
+          ballStartPosition = Vector3.zero;
+        }
       }
 
-      PongBall pongBall = GameObject.FindFirstObjectByType<PongBall>();
-      if (pongBall != null) {
-        Ball = pongBall.gameObject;
-        ballStartPosition = Vector3.zero;
-        return;
-      }
-
-      Ball = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-      Ball.name = "CircleBall";
-      Ball.transform.localScale = Vector3.one * 0.35f;
-      ballStartPosition = Vector3.zero;
+      StyleBall();
     }
 
     void DisableClassicPongControls() {
@@ -330,6 +330,23 @@ public class PongCircleGame : MonoBehaviour
           if (player.PaddleObject != null) {
             player.PaddleObject.SetActive(player.IsAlive);
           }
+
+          // Identité réseau (nom + couleur choisis), partagée à tous les clients.
+          int profileIndex = player.Id - 1;
+          if (!string.IsNullOrEmpty(playerState.name)) {
+            player.Name = playerState.name;
+            if (profileIndex >= 0 && profileIndex < profiles.Count) {
+              profiles[profileIndex].Name = playerState.name;
+            }
+          }
+          if (!string.IsNullOrEmpty(playerState.color)
+              && ColorUtility.TryParseHtmlString("#" + playerState.color, out Color parsedColor)) {
+            parsedColor.a = SectorAlpha;
+            player.Color = parsedColor;
+            if (profileIndex >= 0 && profileIndex < profiles.Count) {
+              profiles[profileIndex].Color = parsedColor;
+            }
+          }
         }
       }
 
@@ -347,6 +364,7 @@ public class PongCircleGame : MonoBehaviour
       winnerId = 0;
       status = "Playing";
 
+      BuildArenaDecor();
       EnsureProfiles(playerCount);
       for (int i = 0; i < playerCount; i++) {
         PlayerProfile profile = profiles[i];
@@ -382,7 +400,9 @@ public class PongCircleGame : MonoBehaviour
       MeshFilter meshFilter = obj.AddComponent<MeshFilter>();
       MeshRenderer meshRenderer = obj.AddComponent<MeshRenderer>();
       meshFilter.mesh = BuildSectorMesh(startAngle, endAngle);
-      meshRenderer.material = CreateMaterial(color);
+      Color fill = color;
+      fill.a = Mathf.Max(color.a, 0.5f);
+      meshRenderer.material = CreateMaterial(fill, 1.1f);
 
       generatedObjects.Add(obj);
       return obj;
@@ -421,7 +441,7 @@ public class PongCircleGame : MonoBehaviour
       GameObject obj = GameObject.CreatePrimitive(PrimitiveType.Cube);
       obj.name = objectName;
       obj.transform.SetParent(transform);
-      obj.GetComponent<Renderer>().material = CreateMaterial(new Color(color.r, color.g, color.b, 1));
+      obj.GetComponent<Renderer>().material = CreateMaterial(new Color(color.r, color.g, color.b, 1), 1.6f);
       Collider collider = obj.GetComponent<Collider>();
       if (collider != null) {
         DestroyObject(collider);
@@ -431,6 +451,10 @@ public class PongCircleGame : MonoBehaviour
     }
 
     Material CreateMaterial(Color color) {
+      return CreateMaterial(color, 0f);
+    }
+
+    Material CreateMaterial(Color color, float emission) {
       Shader shader = Shader.Find("Universal Render Pipeline/Lit");
       if (shader == null) {
         shader = Shader.Find("Standard");
@@ -440,6 +464,15 @@ public class PongCircleGame : MonoBehaviour
       material.color = color;
       if (material.HasProperty("_BaseColor")) {
         material.SetColor("_BaseColor", color);
+      }
+
+      if (emission > 0f) {
+        material.EnableKeyword("_EMISSION");
+        Color hdr = new Color(color.r, color.g, color.b, 1f).linear * emission;
+        if (material.HasProperty("_EmissionColor")) {
+          material.SetColor("_EmissionColor", hdr);
+        }
+        material.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
       }
 
       if (color.a < 1f) {
@@ -456,6 +489,75 @@ public class PongCircleGame : MonoBehaviour
       return material;
     }
 
+    Material CreateUnlitHdrMaterial(Color color, float intensity) {
+      Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+      if (shader == null) {
+        shader = Shader.Find("Unlit/Color");
+      }
+
+      Material material = new Material(shader);
+      Color hdr = color.linear * intensity;
+      if (material.HasProperty("_BaseColor")) {
+        material.SetColor("_BaseColor", hdr);
+      }
+      material.color = hdr;
+      return material;
+    }
+
+    static readonly Color NeonAccent = new Color(0.345f, 0.902f, 0.784f, 1f);
+
+    void BuildArenaDecor() {
+      GameObject backdrop = new GameObject("ArenaBackdrop");
+      backdrop.transform.SetParent(transform);
+      backdrop.transform.localPosition = new Vector3(0, 0, 0.12f); // derrière (caméra en -Z)
+      MeshFilter backdropFilter = backdrop.AddComponent<MeshFilter>();
+      MeshRenderer backdropRenderer = backdrop.AddComponent<MeshRenderer>();
+      backdropFilter.mesh = BuildSectorMesh(0f, 360f);
+      backdropRenderer.material = CreateMaterial(new Color(0.07f, 0.09f, 0.12f, 1f));
+      generatedObjects.Add(backdrop);
+
+      GameObject ring = new GameObject("ArenaRing");
+      ring.transform.SetParent(transform);
+      LineRenderer line = ring.AddComponent<LineRenderer>();
+      line.useWorldSpace = false;
+      line.loop = true;
+      line.widthMultiplier = 0.08f;
+      line.numCapVertices = 4;
+      int segments = 96;
+      line.positionCount = segments;
+      for (int i = 0; i < segments; i++) {
+        float angle = 360f * i / segments;
+        Vector3 p = AngleToDirection(angle) * ArenaRadius;
+        p.z = 0.05f; 
+        line.SetPosition(i, p);
+      }
+      line.material = CreateUnlitHdrMaterial(NeonAccent, 1.6f);
+      generatedObjects.Add(ring);
+    }
+
+    void StyleBall() {
+      if (Ball == null) {
+        return;
+      }
+
+      Renderer renderer = Ball.GetComponent<Renderer>();
+      if (renderer != null) {
+        renderer.material = CreateMaterial(new Color(0.75f, 1f, 0.92f, 1f), 2.5f);
+      }
+
+      TrailRenderer trail = Ball.GetComponent<TrailRenderer>();
+      if (trail == null) {
+        trail = Ball.AddComponent<TrailRenderer>();
+      }
+      trail.time = 0.22f;
+      trail.startWidth = 0.28f;
+      trail.endWidth = 0f;
+      trail.numCapVertices = 2;
+      trail.material = CreateUnlitHdrMaterial(NeonAccent, 2.2f);
+      trail.startColor = new Color(NeonAccent.r, NeonAccent.g, NeonAccent.b, 0.9f);
+      trail.endColor = new Color(NeonAccent.r, NeonAccent.g, NeonAccent.b, 0f);
+    }
+
     void UpdatePaddles() {
       if (!gameStarted) {
         return;
@@ -468,7 +570,6 @@ public class PongCircleGame : MonoBehaviour
         }
 
         if (MouseControlEnabled && i == LocalPlayerIndex && TryReadMouseAngle(out float mouseAngle)) {
-          // Pointage absolu : la raquette suit l'angle de la souris, borné à son secteur.
           player.PaddleAngle = ClampPaddleAngle(mouseAngle, player.SectorStartAngle, player.SectorEndAngle);
         } else {
           float direction = ReadLocalDirection(i);
@@ -557,7 +658,7 @@ public class PongCircleGame : MonoBehaviour
       }
 
       int aliveCount = CountAlivePlayers();
-      // Debug.Log(player.Name + " eliminated. Alive players: " + aliveCount);
+      Debug.Log(player.Name + " eliminated. Alive players: " + aliveCount);
 
       if (aliveCount <= 1) {
         CirclePlayer winner = FindLastAlivePlayer();
@@ -839,7 +940,6 @@ public class PongCircleGame : MonoBehaviour
       CirclePlayer player = players[index];
       Color.RGBToHSV(player.Color, out float h, out float s, out float v);
 
-      // On avance la teinte jusqu'à en trouver une libre (pas trop proche d'un autre joueur).
       float hue = FindFreeHue(h, index);
       Color color = Color.HSVToRGB(hue, 0.75f, 1f);
       color.a = SectorAlpha;
@@ -852,7 +952,6 @@ public class PongCircleGame : MonoBehaviour
       ApplyPlayerColor(player);
     }
 
-    // Couleurs uniques : deux joueurs ne peuvent pas avoir une teinte (presque) identique.
     const float MinHueDistance = 0.04f;
 
     float FindFreeHue(float startHue, int excludeIndex) {
@@ -906,16 +1005,34 @@ public class PongCircleGame : MonoBehaviour
       if (player.PaddleObject != null) {
         Renderer renderer = player.PaddleObject.GetComponent<Renderer>();
         if (renderer != null) {
-          renderer.material = CreateMaterial(new Color(player.Color.r, player.Color.g, player.Color.b, 1));
+          renderer.material = CreateMaterial(new Color(player.Color.r, player.Color.g, player.Color.b, 1), 1.6f);
         }
       }
 
       if (player.SectorObject != null) {
         Renderer renderer = player.SectorObject.GetComponent<Renderer>();
         if (renderer != null) {
-          renderer.material = CreateMaterial(player.Color);
+          Color fill = player.Color;
+          fill.a = Mathf.Max(player.Color.a, 0.5f);
+          renderer.material = CreateMaterial(fill, 1.1f);
         }
       }
+    }
+
+    // Applique une couleur de zone choisie par l'utilisateur (côté client).
+    public void SetPlayerColor(int index, Color color) {
+      if (index < 0 || index >= players.Count) {
+        return;
+      }
+
+      color.a = SectorAlpha;
+      CirclePlayer player = players[index];
+      player.Color = color;
+      if (index < profiles.Count) {
+        profiles[index].Color = color;
+      }
+
+      ApplyPlayerColor(player);
     }
 
     bool TryReadMouseAngle(out float angle) {

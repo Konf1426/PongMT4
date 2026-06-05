@@ -13,21 +13,21 @@
 .card {
     display: none;
     position: absolute;
-    background-color: rgba(13, 17, 23, 0.92);
-    border-radius: 14px;
+    background-color: rgba(11, 15, 20, 0.97);
+    border-radius: 16px;
     border-width: 1px;
-    border-color: rgba(88, 230, 200, 0.25);
-    padding-top: 18px;
-    padding-bottom: 18px;
-    padding-left: 20px;
-    padding-right: 20px;
+    border-color: rgba(88, 230, 200, 0.30);
+    padding-top: 26px;
+    padding-bottom: 26px;
+    padding-left: 30px;
+    padding-right: 30px;
 }
 
 .card--center {
     left: 50%;
     top: 50%;
     translate: -50% -50%;
-    width: 420px;
+    width: 560px;
     align-items: stretch;
 }
 
@@ -38,7 +38,7 @@
 }
 
 .card-title {
-    font-size: 34px;
+    font-size: 42px;
     -unity-font-style: bold;
     color: rgb(88, 230, 200);
     -unity-text-align: middle-center;
@@ -52,18 +52,18 @@
 }
 
 .card-subtitle {
-    font-size: 16px;
-    color: rgb(140, 160, 175);
+    font-size: 19px;
+    color: rgb(150, 170, 185);
     -unity-text-align: middle-center;
-    margin-bottom: 16px;
+    margin-bottom: 18px;
 }
 
 /* Boutons */
 .primary-button {
-    height: 52px;
-    margin-top: 8px;
-    margin-bottom: 8px;
-    font-size: 18px;
+    height: 58px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    font-size: 21px;
     -unity-font-style: bold;
     color: rgb(13, 17, 23);
     background-color: rgb(88, 230, 200);
@@ -100,10 +100,10 @@
 
 /* Texte */
 .info {
-    font-size: 14px;
-    color: rgb(200, 215, 225);
-    margin-top: 2px;
-    margin-bottom: 2px;
+    font-size: 17px;
+    color: rgb(214, 226, 235);
+    margin-top: 3px;
+    margin-bottom: 3px;
 }
 
 .info--accent {
@@ -112,10 +112,52 @@
 }
 
 .hint {
-    font-size: 12px;
-    color: rgb(120, 135, 148);
+    font-size: 14px;
+    color: rgb(140, 155, 168);
     white-space: normal;
+    margin-top: 12px;
+}
+
+/* Bloc identité (nom + couleur) sur l'écran d'entrée */
+.identity {
+    margin-top: 4px;
+    margin-bottom: 8px;
+}
+
+.field-label {
+    font-size: 15px;
+    color: rgb(150, 170, 185);
     margin-top: 10px;
+    margin-bottom: 5px;
+}
+
+.name-field {
+    margin-bottom: 4px;
+}
+
+.color-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+
+.color-swatch {
+    width: 36px;
+    height: 36px;
+    margin-right: 10px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    border-width: 2px;
+    border-color: rgba(255, 255, 255, 0.15);
+    padding: 0;
+}
+
+.color-swatch:hover {
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.color-swatch--selected {
+    border-color: rgb(255, 255, 255);
+    scale: 1.12 1.12;
 }
 
 /* Lobby local */

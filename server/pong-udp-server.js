@@ -56,6 +56,12 @@ socket.on("message", (buffer, remote) => {
 
   const client = registerClient(deviceId, deviceName, remote);
 
+  const displayName = sanitizeDeviceName(envelope.displayName || payload.displayName || "");
+  if (displayName) {
+    client.displayName = displayName;
+  }
+  client.color = sanitizeColor(envelope.color || payload.color || "");
+
   if (payload.type === "hello") {
     sendSnapshot(client);
     return;
@@ -135,6 +141,8 @@ function registerClient(deviceId, deviceName, remote) {
       id: nextClientId++,
       deviceId,
       deviceName: deviceName || "Device",
+      displayName: "",
+      color: "",
       address: remote.address,
       port: remote.port,
       playerId: 0,
@@ -177,6 +185,16 @@ function sanitizeDeviceName(deviceName) {
     .replace(/[^\w .-]/g, "")
     .trim()
     .slice(0, 24);
+}
+
+function sanitizeColor(value) {
+  return String(value || "").replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
+}
+
+function clientLabel(client) {
+  return client.displayName && client.displayName.length > 0
+    ? client.displayName
+    : (client.deviceName || "Device");
 }
 
 function joinGame(client) {
@@ -665,12 +683,26 @@ function buildSnapshot(client) {
     ballDirY: round(game.ballDirY),
     devices: buildDeviceList(),
     lobbyDevices: buildLobbyDeviceList(),
-    players: game.players.map((player) => ({
-      id: player.id,
-      alive: player.alive,
-      paddleAngle: round(player.paddleAngle)
-    }))
+    players: game.players.map((player) => {
+      const owner = clientForPlayerId(player.id);
+      return {
+        id: player.id,
+        alive: player.alive,
+        paddleAngle: round(player.paddleAngle),
+        name: owner ? clientLabel(owner) : "",
+        color: owner ? owner.color : ""
+      };
+    })
   };
+}
+
+function clientForPlayerId(playerId) {
+  for (const client of clientsByDevice.values()) {
+    if (client.playerId === playerId) {
+      return client;
+    }
+  }
+  return null;
 }
 
 function buildDeviceList() {
@@ -679,8 +711,9 @@ function buildDeviceList() {
     .sort((a, b) => a.playerId - b.playerId)
     .map((client) => ({
       playerId: client.playerId,
-      name: client.deviceName || "Device",
-      ready: client.ready
+      name: clientLabel(client),
+      ready: client.ready,
+      color: client.color
     }));
 }
 
@@ -690,8 +723,9 @@ function buildLobbyDeviceList() {
     .sort((a, b) => a.id - b.id)
     .map((client) => ({
       playerId: 0,
-      name: client.deviceName || "Device",
-      ready: false
+      name: clientLabel(client),
+      ready: false,
+      color: client.color
     }));
 }
 

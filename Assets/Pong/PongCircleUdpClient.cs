@@ -76,6 +76,8 @@ public class PongCircleUdpClient : MonoBehaviour
     PongCircleNetworkDeviceState[] lobbyDevices = new PongCircleNetworkDeviceState[0];
     string deviceId;
     string deviceName;
+    string chosenDisplayName = "";
+    string chosenColorHex = "";
     string lastStatus = "UDP offline";
     float nextHelloTime;
     float nextInputSendTime;
@@ -192,6 +194,15 @@ public class PongCircleUdpClient : MonoBehaviour
       SendMessage("{\"type\":\"lobby\"}");
     }
 
+    // Identité choisie par l'utilisateur, propagée au serveur
+    public void SetIdentity(string name, string colorHex) {
+      chosenDisplayName = name ?? "";
+      chosenColorHex = (colorHex ?? "").Replace("#", "");
+      if (connected) {
+        SendHello();
+      }
+    }
+
     public void SetOnScreenDirection(float direction) {
       onScreenDirection = Mathf.Clamp(direction, -1, 1);
       onScreenDirectionTime = Time.unscaledTime;
@@ -305,7 +316,7 @@ public class PongCircleUdpClient : MonoBehaviour
         return;
       }
 
-      string wrapped = "{\"seq\":" + (++sequence) + ",\"deviceId\":\"" + Escape(deviceId) + "\",\"deviceName\":\"" + Escape(deviceName) + "\",\"payload\":" + json + "}";
+      string wrapped = "{\"seq\":" + (++sequence) + ",\"deviceId\":\"" + Escape(deviceId) + "\",\"deviceName\":\"" + Escape(deviceName) + "\",\"displayName\":\"" + Escape(chosenDisplayName) + "\",\"color\":\"" + Escape(chosenColorHex) + "\",\"payload\":" + json + "}";
       byte[] data = Encoding.UTF8.GetBytes(wrapped);
       try {
         udp.Send(data, data.Length);

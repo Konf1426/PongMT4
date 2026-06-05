@@ -31,6 +31,7 @@ public class PongCircleNetworkDeviceState
     public int playerId;
     public string name;
     public bool ready;
+    public string color; 
 }
 
 [Serializable]
@@ -39,4 +40,6 @@ public class PongCircleNetworkPlayerState
     public int id;
     public bool alive;
     public float paddleAngle;
+    public string name;  
+    public string color; 
 }

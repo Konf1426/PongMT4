@@ -7,6 +7,12 @@
         <ui:VisualElement name="panel-join" class="card card--center">
             <ui:Label text="Circle Pong" name="join-title" class="card-title" />
             <ui:Label text="Menu" name="join-subtitle" class="card-subtitle" />
+            <ui:VisualElement name="join-identity" class="identity">
+                <ui:Label text="Ton nom" class="field-label" />
+                <ui:TextField name="join-name" class="name-field" />
+                <ui:Label text="Couleur de ta zone" class="field-label" />
+                <ui:VisualElement name="join-colors" class="color-row" />
+            </ui:VisualElement>
             <ui:Button text="Jouer / Rejoindre" name="btn-join" class="primary-button" />
             <ui:Label text="" name="join-yourplayer" class="info info--accent" />
             <ui:Label text="" name="join-network" class="info" />

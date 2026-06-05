@@ -2,18 +2,7 @@ using UnityEngine;
 using UnityEngine.UIElements;
 
 /// <summary>
-/// HUD du Circle Pong en UI Toolkit (remplace l'UI IMGUI de PongCircleLauncher).
-///
-/// Ne touche pas au réseau : ce contrôleur LIT l'état public (PongCircleGame +
-/// PongCircleUdpClient via le launcher) chaque frame et APPELLE les mêmes actions.
-/// Il masque l'ancienne IMGUI via PongCircleLauncher.HideImguiUi.
-///
-/// 5 écrans, pilotés par visibilité :
-///   - join   : menu réseau (rejoindre / lancer) + statut + devices
-///   - lobby  : lobby local hors-réseau (+/- joueurs, souris)
-///   - hud    : en jeu (joueurs, statut, restart)
-///   - win    : écran de victoire (replay / retour lobby)
-///   - mobile : flèches tactiles ←/→ pendant la partie
+
 /// </summary>
 [RequireComponent(typeof(UIDocument))]
 public class PongCircleHud : MonoBehaviour
@@ -49,8 +38,27 @@ public class PongCircleHud : MonoBehaviour
     Button btnLeft, btnRight;
     float mobileDirection;
 
-    // Caches pour éviter de reconstruire les listes chaque frame
     string sigJoinDevices, sigJoinLobby, sigHudDevices, sigHudLobby;
+
+    TextField nameField;
+    VisualElement colorRow;
+    string chosenName = "";
+    Color chosenColor;
+    int chosenColorIndex = -1;
+    int lastIdentityTarget = -2;
+
+    static readonly Color[] Palette = {
+        new Color(0.345f, 0.902f, 0.784f), // turquoise
+        new Color(0.961f, 0.353f, 0.408f), // rouge
+        new Color(0.984f, 0.686f, 0.243f), // orange
+        new Color(0.969f, 0.878f, 0.318f), // jaune
+        new Color(0.486f, 0.812f, 0.380f), // vert
+        new Color(0.388f, 0.616f, 0.961f), // bleu
+        new Color(0.706f, 0.514f, 0.961f), // violet
+        new Color(0.961f, 0.510f, 0.776f), // rose
+        new Color(0.380f, 0.835f, 0.961f), // cyan
+        new Color(0.741f, 0.910f, 0.376f), // citron vert
+    };
 
     void OnEnable()
     {
@@ -93,6 +101,24 @@ public class PongCircleHud : MonoBehaviour
         joinLobbyDevices = root.Q<VisualElement>("join-lobby-devices");
         btnJoin = root.Q<Button>("btn-join");
         if (btnJoin != null) btnJoin.clicked += OnJoinClicked;
+
+        // Identité : nom + palette de couleurs
+        nameField = root.Q<TextField>("join-name");
+        colorRow = root.Q<VisualElement>("join-colors");
+        LoadIdentityPrefs();
+        if (nameField != null)
+        {
+            nameField.SetValueWithoutNotify(chosenName);
+            nameField.RegisterValueChangedCallback(e =>
+            {
+                chosenName = e.newValue;
+                SaveIdentityPrefs();
+                ApplyIdentity();
+                SendIdentityToServer();
+            });
+        }
+        BuildSwatches();
+        SendIdentityToServer();
 
         // Local lobby
         btnLobbyStart = root.Q<Button>("btn-lobby-start");
@@ -196,6 +222,8 @@ public class PongCircleHud : MonoBehaviour
         if (showWin) RefreshWin(network);
         if (showLobby) RefreshLobby();
         if (showHud) RefreshHud(network);
+
+        TrackIdentity();
     }
 
     void RefreshJoin(int localId)
@@ -215,6 +243,113 @@ public class PongCircleHud : MonoBehaviour
 
         RebuildInGameDevices(joinDevices, ref sigJoinDevices);
         RebuildLobbyDevices(joinLobbyDevices, ref sigJoinLobby);
+    }
+
+    // --- Identité du joueur (nom + couleur de zone) ---
+    void BuildSwatches()
+    {
+        if (colorRow == null) return;
+        colorRow.Clear();
+        for (int i = 0; i < Palette.Length; i++)
+        {
+            int index = i;
+            Button swatch = new Button();
+            swatch.AddToClassList("color-swatch");
+            swatch.style.backgroundColor = Palette[i];
+            swatch.clicked += () => SelectColor(index);
+            colorRow.Add(swatch);
+        }
+        UpdateSwatchSelection();
+    }
+
+    void SelectColor(int index)
+    {
+        chosenColorIndex = index;
+        chosenColor = Palette[index];
+        SaveIdentityPrefs();
+        UpdateSwatchSelection();
+        ApplyIdentity();
+        SendIdentityToServer();
+    }
+
+    // Propage l'identité au serveur UDP (nom + couleur hex). No-op hors réseau.
+    void SendIdentityToServer()
+    {
+        if (!ShouldUseUdp()) return;
+        string hex = chosenColorIndex >= 0 ? ColorUtility.ToHtmlStringRGB(chosenColor) : "";
+        Udp.SetIdentity(chosenName, hex);
+    }
+
+    void UpdateSwatchSelection()
+    {
+        if (colorRow == null) return;
+        int i = 0;
+        foreach (VisualElement child in colorRow.Children())
+        {
+            child.EnableInClassList("color-swatch--selected", i == chosenColorIndex);
+            i++;
+        }
+    }
+
+    // Cible : index du joueur local (réseau : id-1 une fois rejoint ; local : LocalPlayerIndex).
+    int IdentityTargetIndex()
+    {
+        if (Game == null) return -1;
+        if (ShouldUseNetwork())
+        {
+            int id = LocalPlayerId();
+            return id > 0 ? id - 1 : -1;
+        }
+        return Game.CurrentPlayerCount > 0
+            ? Mathf.Clamp(Game.LocalPlayerIndex, 0, Game.CurrentPlayerCount - 1)
+            : -1;
+    }
+
+    void ApplyIdentity()
+    {
+        int index = IdentityTargetIndex();
+        if (Game == null || index < 0 || index >= Game.CurrentPlayerCount) return;
+
+        if (!string.IsNullOrWhiteSpace(chosenName))
+        {
+            Game.SetPlayerName(index, chosenName);
+        }
+        if (chosenColorIndex >= 0)
+        {
+            Game.SetPlayerColor(index, chosenColor);
+        }
+    }
+
+    // Applique l'identité dès que la cible devient valide (ou change).
+    void TrackIdentity()
+    {
+        int index = IdentityTargetIndex();
+        if (index != lastIdentityTarget)
+        {
+            lastIdentityTarget = index;
+            if (index >= 0) ApplyIdentity();
+        }
+    }
+
+    void LoadIdentityPrefs()
+    {
+        chosenName = PlayerPrefs.GetString("pong_name", "");
+        chosenColorIndex = PlayerPrefs.GetInt("pong_color_index", -1);
+        if (chosenColorIndex >= 0 && chosenColorIndex < Palette.Length)
+        {
+            chosenColor = Palette[chosenColorIndex];
+        }
+        else
+        {
+            chosenColorIndex = -1;
+        }
+    }
+
+    void SaveIdentityPrefs()
+    {
+        PlayerPrefs.SetString("pong_name", chosenName ?? "");
+        PlayerPrefs.SetInt("pong_color_index", chosenColorIndex);
+        PlayerPrefs.Save();
     }
 
     void RefreshLobby()

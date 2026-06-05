@@ -4,10 +4,10 @@
     <ui:VisualElement name="menu-root" class="menu-root">
         <ui:VisualElement name="header" class="header">
             <ui:Label text="Circle Pong" name="title" class="title" />
-            <ui:Label text="Menu" name="subtitle" class="subtitle" />
+            <ui:Label text="Multijoueur" name="subtitle" class="subtitle" />
         </ui:VisualElement>
         <ui:VisualElement name="panel" class="panel">
-            <ui:Button text="Join / Start Game" name="play-circle" class="menu-button" />
+            <ui:Button text="Jouer" name="play-circle" class="menu-button" />
             <ui:Button text="Quitter" name="quit" class="menu-button menu-button--ghost" />
         </ui:VisualElement>
         <ui:VisualElement name="footer" class="footer">

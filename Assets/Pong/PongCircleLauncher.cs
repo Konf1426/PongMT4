@@ -10,6 +10,10 @@ public class PongCircleLauncher : MonoBehaviour
     public PongCircleUdpClient UdpClient;
     public bool EnableUdpSync = true;
 
+    // Mis à true par PongCircleHud (UI Toolkit) pour masquer cette UI IMGUI héritée.
+    // Reste false si le HUD UI Toolkit est absent (fallback).
+    public bool HideImguiUi = false;
+
     string playerCount = "4";
     float nextJoinTapTime;
 
@@ -60,6 +64,10 @@ public class PongCircleLauncher : MonoBehaviour
 
     void OnGUI() {
       if (!Application.isPlaying) {
+        return;
+      }
+
+      if (HideImguiUi) {
         return;
       }
 

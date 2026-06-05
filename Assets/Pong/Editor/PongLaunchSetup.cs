@@ -19,6 +19,7 @@ public static class PongLaunchSetup
 
     const string ThemePath = UiFolder + "/PongTheme.tss";
     const string UxmlPath = UiFolder + "/MainMenu.uxml";
+    const string HudUxmlPath = UiFolder + "/PongCircleHud.uxml";
     const string PanelPath = UiFolder + "/PongPanelSettings.asset";
     const string LaunchScenePath = ScenesFolder + "/Launch.unity";
     const string GameScenePath = "Assets/Pong/Pong.unity";
@@ -26,6 +27,11 @@ public static class PongLaunchSetup
     [MenuItem("Tools/Pong/Setup Launch Scene")]
     public static void Setup()
     {
+        if (IsInPlayMode())
+        {
+            return;
+        }
+
         AssetDatabase.Refresh();
 
         if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
@@ -47,6 +53,64 @@ public static class PongLaunchSetup
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
         Debug.Log("PongLaunchSetup: scène de lancement prête. Ouvre " + LaunchScenePath + " et lance le jeu.");
+    }
+
+    [MenuItem("Tools/Pong/Setup Game HUD")]
+    public static void SetupHud()
+    {
+        if (IsInPlayMode())
+        {
+            return;
+        }
+
+        AssetDatabase.Refresh();
+
+        if (!EditorSceneManager.SaveCurrentModifiedScenesIfUserWantsTo())
+        {
+            return;
+        }
+
+        if (!System.IO.File.Exists(GameScenePath))
+        {
+            Debug.LogError("PongLaunchSetup: scène de jeu introuvable à " + GameScenePath);
+            return;
+        }
+
+        VisualTreeAsset hudAsset = AssetDatabase.LoadAssetAtPath<VisualTreeAsset>(HudUxmlPath);
+        if (hudAsset == null)
+        {
+            Debug.LogError("PongLaunchSetup: PongCircleHud.uxml introuvable à " + HudUxmlPath);
+            return;
+        }
+
+        PanelSettings panel = CreateOrLoadPanelSettings();
+
+        Scene scene = EditorSceneManager.OpenScene(GameScenePath, OpenSceneMode.Single);
+
+        // EventSystem requis par l'input UI Toolkit au runtime.
+        if (Object.FindAnyObjectByType<UnityEngine.EventSystems.EventSystem>() == null)
+        {
+            GameObject eventSystemGo = new GameObject("EventSystem");
+            eventSystemGo.AddComponent<UnityEngine.EventSystems.EventSystem>();
+            eventSystemGo.AddComponent<UnityEngine.InputSystem.UI.InputSystemUIInputModule>();
+        }
+
+        // Idempotent : on retire un éventuel HUD précédent avant de recréer.
+        GameObject previous = GameObject.Find("CircleHud");
+        if (previous != null)
+        {
+            Object.DestroyImmediate(previous);
+        }
+
+        GameObject hudGo = new GameObject("CircleHud");
+        UIDocument document = hudGo.AddComponent<UIDocument>();
+        WireUIDocument(document, panel, hudAsset);
+        hudGo.AddComponent<PongCircleHud>();
+
+        EditorSceneManager.MarkSceneDirty(scene);
+        EditorSceneManager.SaveScene(scene);
+        AssetDatabase.SaveAssets();
+        Debug.Log("PongLaunchSetup: HUD UI Toolkit ajouté à " + GameScenePath + ". Relance le jeu.");
     }
 
     static PanelSettings CreateOrLoadPanelSettings()
@@ -98,8 +162,7 @@ public static class PongLaunchSetup
 
         GameObject menuGo = new GameObject("MainMenu");
         UIDocument document = menuGo.AddComponent<UIDocument>();
-        document.panelSettings = panel;
-        document.visualTreeAsset = menuAsset;
+        WireUIDocument(document, panel, menuAsset);
         menuGo.AddComponent<PongMainMenu>();
 
         EnsureFolder(ScenesFolder);
@@ -132,6 +195,40 @@ public static class PongLaunchSetup
         }
 
         EditorBuildSettings.scenes = scenes.ToArray();
+    }
+
+    // Câble le UIDocument en écrivant DIRECTEMENT les champs sérialisés.
+    // Le setter UIDocument.panelSettings ne « prend » pas toujours par script à
+    // l'édition (le champ resterait {fileID: 0} après sauvegarde de la scène).
+    static void WireUIDocument(UIDocument document, PanelSettings panel, VisualTreeAsset uxml)
+    {
+        SerializedObject so = new SerializedObject(document);
+
+        SerializedProperty panelProp = so.FindProperty("m_PanelSettings");
+        if (panelProp != null)
+        {
+            panelProp.objectReferenceValue = panel;
+        }
+
+        SerializedProperty sourceProp = so.FindProperty("sourceAsset");
+        if (sourceProp != null)
+        {
+            sourceProp.objectReferenceValue = uxml;
+        }
+
+        so.ApplyModifiedPropertiesWithoutUndo();
+        EditorUtility.SetDirty(document);
+    }
+
+    static bool IsInPlayMode()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+        {
+            Debug.LogWarning("PongLaunchSetup: sors du mode Play avant de lancer ce setup.");
+            return true;
+        }
+
+        return false;
     }
 
     static void EnsureFolder(string path)

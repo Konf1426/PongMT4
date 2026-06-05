@@ -647,6 +647,7 @@ GameObject:
   - component: {fileID: 351165255}
   - component: {fileID: 351165254}
   - component: {fileID: 351165256}
+  - component: {fileID: 351165257}
   m_Layer: 0
   m_Name: CircleLauncher
   m_TagString: Untagged
@@ -667,6 +668,9 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::PongCircleLauncher
   CircleGame: {fileID: 351165256}
+  UdpClient: {fileID: 351165257}
+  EnableUdpSync: 1
+  HideImguiUi: 0
 --- !u!4 &351165255
 Transform:
   m_ObjectHideFlags: 0
@@ -705,6 +709,9 @@ MonoBehaviour:
   PlayerCount: 2
   MinimumPlayers: 2
   MaximumPlayers: 10
+  MouseControlEnabled: 1
+  LocalPlayerIndex: 0
+  StartCountdownDuration: 3
   PreviewInEditMode: 1
   ArenaRadius: 5
   SectorAlpha: 0.22
@@ -716,7 +723,25 @@ MonoBehaviour:
   PaddleAimInfluence: 0.45
   StartInLobby: 1
   HideClassicPongObjects: 1
+  NetworkControlled: 0
   Ball: {fileID: 2030656710}
+--- !u!114 &351165257
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 351165253}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 5311802610e210b4698767b6a211f1a6, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PongCircleUdpClient
+  CircleGame: {fileID: 351165256}
+  ServerHost: pong.becop.fr
+  ServerPort: 41234
+  AutoConnect: 1
+  InputSendRate: 30
 --- !u!1 &371610001
 GameObject:
   m_ObjectHideFlags: 0
@@ -3787,6 +3812,74 @@ MeshFilter:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 1786767634}
   m_Mesh: {fileID: 1670476122}
+--- !u!1 &1842910492
+GameObject:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  serializedVersion: 6
+  m_Component:
+  - component: {fileID: 1842910495}
+  - component: {fileID: 1842910494}
+  - component: {fileID: 1842910493}
+  m_Layer: 0
+  m_Name: CircleHud
+  m_TagString: Untagged
+  m_Icon: {fileID: 0}
+  m_NavMeshLayer: 0
+  m_StaticEditorFlags: 0
+  m_IsActive: 1
+--- !u!114 &1842910493
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1842910492}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 87006de21db449b3a2afc25d1a53c043, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::PongCircleHud
+--- !u!114 &1842910494
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1842910492}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 19102, guid: 0000000000000000e000000000000000, type: 0}
+  m_Name: 
+  m_EditorClassIdentifier: UnityEngine.dll::UnityEngine.UIElements.UIDocument
+  m_PanelSettings: {fileID: 11400000, guid: 72cd861a46a40438eb528ac6a9c7abc8, type: 2}
+  m_ParentUI: {fileID: 0}
+  sourceAsset: {fileID: 9197481963319205126, guid: 2defc5c6e12a40bd8929fd30970b2072, type: 3}
+  m_SortingOrder: 0
+  m_Position: 0
+  m_WorldSpaceSizeMode: 1
+  m_WorldSpaceWidth: 1920
+  m_WorldSpaceHeight: 1080
+  m_PivotReferenceSize: 0
+  m_Pivot: 0
+  m_WorldSpaceCollider: {fileID: 0}
+--- !u!4 &1842910495
+Transform:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1842910492}
+  serializedVersion: 2
+  m_LocalRotation: {x: 0, y: 0, z: 0, w: 1}
+  m_LocalPosition: {x: 0, y: 0, z: 0}
+  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_ConstrainProportionsScale: 0
+  m_Children: []
+  m_Father: {fileID: 0}
+  m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
 --- !u!1 &1903440898
 GameObject:
   m_ObjectHideFlags: 0
@@ -4705,3 +4798,4 @@ SceneRoots:
   - {fileID: 1903440902}
   - {fileID: 551751738}
   - {fileID: 351165255}
+  - {fileID: 1842910495}

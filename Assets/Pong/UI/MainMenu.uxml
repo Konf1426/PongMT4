@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements" editor-extension-mode="False">
+    <Style src="project://database/Assets/Pong/UI/MainMenu.uss?fileID=7433441132597879392&amp;guid=70775d2d7df049c69c2a32fb18458d53&amp;type=3#MainMenu" />
+    <ui:VisualElement name="menu-root" class="menu-root">
+        <ui:VisualElement name="header" class="header">
+            <ui:Label text="Circle Pong" name="title" class="title" />
+            <ui:Label text="Menu" name="subtitle" class="subtitle" />
+        </ui:VisualElement>
+        <ui:VisualElement name="panel" class="panel">
+            <ui:Button text="Join / Start Game" name="play-circle" class="menu-button" />
+            <ui:Button text="Quitter" name="quit" class="menu-button menu-button--ghost" />
+        </ui:VisualElement>
+        <ui:VisualElement name="footer" class="footer">
+            <ui:Label text="v0.0" name="version" class="version" />
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>

@@ -1,0 +1,78 @@
+/* Scène de lancement — Pong multijoueur */
+
+.menu-root {
+    flex-grow: 1;
+    align-items: center;
+    justify-content: space-between;
+    background-color: rgb(13, 17, 23);
+    padding-top: 64px;
+    padding-bottom: 40px;
+}
+
+.header {
+    align-items: center;
+}
+
+.title {
+    font-size: 60px;
+    -unity-font-style: bold;
+    color: rgb(88, 230, 200);
+    letter-spacing: 4px;
+    margin-bottom: 4px;
+}
+
+.subtitle {
+    font-size: 22px;
+    color: rgb(140, 160, 175);
+    letter-spacing: 6px;
+}
+
+.panel {
+    width: 360px;
+    align-items: stretch;
+    justify-content: center;
+}
+
+.menu-button {
+    height: 64px;
+    margin-top: 12px;
+    margin-bottom: 12px;
+    font-size: 24px;
+    color: rgb(13, 17, 23);
+    background-color: rgb(88, 230, 200);
+    border-width: 0;
+    border-radius: 10px;
+    -unity-font-style: bold;
+    transition-property: scale, background-color;
+    transition-duration: 0.12s;
+}
+
+.menu-button:hover {
+    background-color: rgb(120, 245, 215);
+    scale: 1.03 1.03;
+}
+
+.menu-button:active {
+    scale: 0.98 0.98;
+}
+
+.menu-button--ghost {
+    background-color: rgba(0, 0, 0, 0);
+    color: rgb(140, 160, 175);
+    border-width: 2px;
+    border-color: rgb(60, 72, 84);
+}
+
+.menu-button--ghost:hover {
+    background-color: rgba(255, 255, 255, 0.06);
+    color: rgb(200, 215, 225);
+}
+
+.footer {
+    align-items: center;
+}
+
+.version {
+    font-size: 14px;
+    color: rgb(90, 104, 116);
+}

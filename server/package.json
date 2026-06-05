@@ -4,10 +4,7 @@
   "private": true,
   "type": "commonjs",
   "scripts": {
-    "start": "node pong-websocket-server.js",
+    "start": "node pong-udp-server.js",
     "start:udp": "node pong-udp-server.js"
-  },
-  "dependencies": {
-    "ws": "^8.17.0"
   }
 }

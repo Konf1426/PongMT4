@@ -6,9 +6,7 @@ public class PongCircleLauncher : MonoBehaviour
     const string LauncherUiVersion = "UDP UI v2";
 
     public PongCircleGame CircleGame;
-    public PongCircleWebSocketClient WebSocketClient;
     public PongCircleUdpClient UdpClient;
-    public bool EnableWebSocketSync = true;
     public bool EnableUdpSync = true;
 
     string playerCount = "4";
@@ -24,7 +22,6 @@ public class PongCircleLauncher : MonoBehaviour
 
     void Awake() {
       EnsureCircleGame();
-      EnsureWebSocketClient();
       EnsureUdpClient();
       playerCount = Mathf.Max(CircleGame.MinimumPlayers, CircleGame.PlayerCount).ToString();
     }
@@ -44,24 +41,8 @@ public class PongCircleLauncher : MonoBehaviour
       }
     }
 
-    void EnsureWebSocketClient() {
-      if (!EnableWebSocketSync || !ShouldCreateWebSocketClient()) {
-        return;
-      }
-
-      if (WebSocketClient == null) {
-        WebSocketClient = GetComponent<PongCircleWebSocketClient>();
-      }
-
-      if (WebSocketClient == null) {
-        WebSocketClient = gameObject.AddComponent<PongCircleWebSocketClient>();
-      }
-
-      WebSocketClient.CircleGame = CircleGame;
-    }
-
     void EnsureUdpClient() {
-      if (!EnableUdpSync || !ShouldCreateUdpClient()) {
+      if (!EnableUdpSync) {
         return;
       }
 
@@ -222,7 +203,7 @@ public class PongCircleLauncher : MonoBehaviour
       GUILayout.Space(8);
 
       if (GUILayout.Button("Join / Start Game", GUILayout.Height(42))) {
-        if (ShouldUseWebSocket()) {
+        if (ShouldUseUdp()) {
           SendNetworkStartGame();
         } else {
           CircleGame.StartGame();
@@ -361,27 +342,12 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     bool ShouldUseNetwork() {
-      return ShouldUseWebSocket() || ShouldUseUdp();
-    }
-
-    bool ShouldUseWebSocket() {
-      return EnableWebSocketSync
-        && WebSocketClient != null
-        && Application.platform == RuntimePlatform.WebGLPlayer;
+      return ShouldUseUdp();
     }
 
     bool ShouldUseUdp() {
       return EnableUdpSync
-        && UdpClient != null
-        && Application.platform != RuntimePlatform.WebGLPlayer;
-    }
-
-    bool ShouldCreateWebSocketClient() {
-      return Application.platform == RuntimePlatform.WebGLPlayer;
-    }
-
-    bool ShouldCreateUdpClient() {
-      return Application.platform != RuntimePlatform.WebGLPlayer;
+        && UdpClient != null;
     }
 
     void DrawMobileControls() {
@@ -479,10 +445,6 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     bool IsNetworkConnected() {
-      if (ShouldUseWebSocket()) {
-        return WebSocketClient.IsConnected;
-      }
-
       if (ShouldUseUdp()) {
         return UdpClient.IsConnected;
       }
@@ -491,18 +453,12 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     void ConnectNetwork() {
-      if (ShouldUseWebSocket()) {
-        WebSocketClient.Connect();
-      } else if (ShouldUseUdp()) {
+      if (ShouldUseUdp()) {
         UdpClient.Connect();
       }
     }
 
     int GetLocalPlayerId() {
-      if (ShouldUseWebSocket()) {
-        return WebSocketClient.LocalPlayerId;
-      }
-
       if (ShouldUseUdp()) {
         return UdpClient.LocalPlayerId;
       }
@@ -511,10 +467,6 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     int GetConnectedPlayerCount() {
-      if (ShouldUseWebSocket()) {
-        return WebSocketClient.ConnectedPlayerCount;
-      }
-
       if (ShouldUseUdp()) {
         return UdpClient.ConnectedPlayerCount;
       }
@@ -523,10 +475,6 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     int GetReadyPlayerCount() {
-      if (ShouldUseWebSocket()) {
-        return WebSocketClient.ReadyPlayerCount;
-      }
-
       if (ShouldUseUdp()) {
         return UdpClient.ReadyPlayerCount;
       }
@@ -535,10 +483,6 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     int GetReplayVoteCount() {
-      if (ShouldUseWebSocket()) {
-        return WebSocketClient.ReplayVoteCount;
-      }
-
       if (ShouldUseUdp()) {
         return UdpClient.ReplayVoteCount;
       }
@@ -547,10 +491,6 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     int GetPostGameRemainingSeconds() {
-      if (ShouldUseWebSocket()) {
-        return WebSocketClient.PostGameRemainingSeconds;
-      }
-
       if (ShouldUseUdp()) {
         return UdpClient.PostGameRemainingSeconds;
       }
@@ -559,10 +499,6 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     bool IsLobbyOpen() {
-      if (ShouldUseWebSocket()) {
-        return WebSocketClient.LobbyOpen;
-      }
-
       if (ShouldUseUdp()) {
         return UdpClient.LobbyOpen;
       }
@@ -571,10 +507,6 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     string GetNetworkStatus() {
-      if (ShouldUseWebSocket()) {
-        return WebSocketClient.LastStatus;
-      }
-
       if (ShouldUseUdp()) {
         return UdpClient.LastStatus;
       }
@@ -583,10 +515,6 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     PongCircleNetworkDeviceState[] GetNetworkDevices() {
-      if (ShouldUseWebSocket()) {
-        return WebSocketClient.Devices;
-      }
-
       if (ShouldUseUdp()) {
         return UdpClient.Devices;
       }
@@ -595,10 +523,6 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     PongCircleNetworkDeviceState[] GetNetworkLobbyDevices() {
-      if (ShouldUseWebSocket()) {
-        return WebSocketClient.LobbyDevices;
-      }
-
       if (ShouldUseUdp()) {
         return UdpClient.LobbyDevices;
       }
@@ -607,10 +531,6 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     bool ShouldShowNetworkMobileControls() {
-      if (ShouldUseWebSocket()) {
-        return WebSocketClient.ShouldShowMobileControls();
-      }
-
       if (ShouldUseUdp()) {
         return UdpClient.ShouldShowMobileControls();
       }
@@ -619,41 +539,31 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     void SetNetworkOnScreenDirection(float direction) {
-      if (ShouldUseWebSocket()) {
-        WebSocketClient.SetOnScreenDirection(direction);
-      } else if (ShouldUseUdp()) {
+      if (ShouldUseUdp()) {
         UdpClient.SetOnScreenDirection(direction);
       }
     }
 
     void SendNetworkStartGame() {
-      if (ShouldUseWebSocket()) {
-        WebSocketClient.SendStartGame();
-      } else if (ShouldUseUdp()) {
+      if (ShouldUseUdp()) {
         UdpClient.SendStartGame();
       }
     }
 
     void SendNetworkRestartLobby() {
-      if (ShouldUseWebSocket()) {
-        WebSocketClient.SendRestartLobby();
-      } else if (ShouldUseUdp()) {
+      if (ShouldUseUdp()) {
         UdpClient.SendRestartLobby();
       }
     }
 
     void SendNetworkReplayVote() {
-      if (ShouldUseWebSocket()) {
-        WebSocketClient.SendReplayVote();
-      } else if (ShouldUseUdp()) {
+      if (ShouldUseUdp()) {
         UdpClient.SendReplayVote();
       }
     }
 
     void SendNetworkReturnLobby() {
-      if (ShouldUseWebSocket()) {
-        WebSocketClient.SendReturnLobby();
-      } else if (ShouldUseUdp()) {
+      if (ShouldUseUdp()) {
         UdpClient.SendReturnLobby();
       }
     }

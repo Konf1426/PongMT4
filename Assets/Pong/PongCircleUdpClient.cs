@@ -60,6 +60,9 @@ public class PongCircleUdpClient : MonoBehaviour
     UdpClient udp;
     IPEndPoint serverEndPoint;
     Thread receiveThread;
+    // File producteur/consommateur : le thread réseau y dépose les datagrammes reçus,
+    // le thread principal Unity les retire. Le verrou protège l'accès concurrent
+    // (l'API Unity n'étant pas thread-safe, on ne la touche que sur le thread principal).
     readonly Queue<string> receivedMessages = new Queue<string>();
     readonly object receivedMessagesLock = new object();
 
@@ -212,6 +215,8 @@ public class PongCircleUdpClient : MonoBehaviour
       return Application.isMobilePlatform || Input.touchSupported || Touchscreen.current != null;
     }
 
+    // PRODUCTEUR (thread d'arrière-plan) : boucle bloquante sur udp.Receive().
+    // Chaque message est empilé dans la file partagée ; aucune logique de jeu ici.
     void ReceiveLoop() {
       IPEndPoint remote = new IPEndPoint(IPAddress.Any, 0);
       while (!stopping) {
@@ -230,6 +235,9 @@ public class PongCircleUdpClient : MonoBehaviour
       }
     }
 
+    // CONSOMMATEUR (thread principal, appelé chaque frame) : vide la file et
+    // traite les messages un par un. On ne garde le verrou que le temps du Dequeue
+    // pour ne pas bloquer le thread réseau pendant le traitement.
     void DrainMessages() {
       while (true) {
         string message = null;

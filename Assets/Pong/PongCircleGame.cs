@@ -331,21 +331,13 @@ public class PongCircleGame : MonoBehaviour
             player.PaddleObject.SetActive(player.IsAlive);
           }
 
-          // Identité réseau (nom + couleur choisis), partagée à tous les clients.
-          int profileIndex = player.Id - 1;
           if (!string.IsNullOrEmpty(playerState.name)) {
             player.Name = playerState.name;
-            if (profileIndex >= 0 && profileIndex < profiles.Count) {
-              profiles[profileIndex].Name = playerState.name;
-            }
           }
           if (!string.IsNullOrEmpty(playerState.color)
               && ColorUtility.TryParseHtmlString("#" + playerState.color, out Color parsedColor)) {
             parsedColor.a = SectorAlpha;
             player.Color = parsedColor;
-            if (profileIndex >= 0 && profileIndex < profiles.Count) {
-              profiles[profileIndex].Color = parsedColor;
-            }
           }
         }
       }
@@ -371,8 +363,7 @@ public class PongCircleGame : MonoBehaviour
 
         CirclePlayer player = new CirclePlayer();
         player.Id = i + 1;
-        player.Name = profile.Name;
-        player.Color = profile.Color;
+        player.Profile = profile;
         player.PaddleObject = CreatePaddle("Paddle_Player_" + player.Id, player.Color);
         players.Add(player);
       }
@@ -408,6 +399,8 @@ public class PongCircleGame : MonoBehaviour
       return obj;
     }
 
+    // Construit le maillage d'un secteur en éventail de triangles (triangle fan) :
+    // portion de disque entre startAngle et endAngle.
     Mesh BuildSectorMesh(float startAngle, float endAngle) {
       int arcSteps = 16;
       Vector3[] vertices = new Vector3[arcSteps + 2];
@@ -618,6 +611,12 @@ public class PongCircleGame : MonoBehaviour
         return;
       }
 
+      // Collision : la balle a atteint le bord du cercle (ballPosition.magnitude >= rayon).
+      // 1) On convertit sa position en angle pour savoir par quel SECTEUR elle sort,
+      //    donc quel joueur est censé défendre.
+      // 2) On mesure l'écart angulaire entre le point d'impact et le centre de la raquette.
+      //    Si cet écart est dans la demi-largeur de la raquette → rebond ; sinon le joueur
+      //    a raté et est éliminé.
       float angle = DirectionToAngle(ballPosition);
       CirclePlayer defender = FindPlayerAtAngle(angle);
       if (defender == null || !defender.IsAlive) {
@@ -633,6 +632,14 @@ public class PongCircleGame : MonoBehaviour
       }
     }
 
+    // Rebond de la balle sur une raquette, avec effet de visée.
+    // - La raquette est tangente au cercle ; sa normale est radiale (paddleDirection).
+    //   On réfléchit donc le vecteur vitesse par rapport à cette normale (Vector3.Reflect).
+    // - "offset" ∈ [-1, 1] indique où la balle a frappé sur la raquette (centre = 0,
+    //   bords = ±1). On ajoute une composante tangentielle proportionnelle → le joueur
+    //   peut orienter la balle selon le point de contact (PaddleAimInfluence = dosage).
+    // - Garde-fou : si la balle ne repart pas assez vers l'intérieur, on la ré-incline
+    //   vers le centre pour éviter qu'elle longe le bord.
     void BounceOnPaddle(CirclePlayer defender, float impactAngle) {
       Vector3 impactDirection = AngleToDirection(impactAngle);
       Vector3 paddleDirection = AngleToDirection(defender.PaddleAngle);
@@ -689,6 +696,9 @@ public class PongCircleGame : MonoBehaviour
       return null;
     }
 
+    // Teste si un angle tombe dans un secteur [start, end], en restant robuste au
+    // passage par 0°/360° : on compare l'écart à la moitié de la largeur du secteur,
+    // toujours via Mathf.DeltaAngle (qui gère le wraparound), jamais par simple <=.
     bool AngleInsideSector(float angle, float startAngle, float endAngle) {
       float center = Mathf.LerpAngle(startAngle, endAngle, 0.5f);
       float halfSize = Mathf.Abs(Mathf.DeltaAngle(startAngle, endAngle)) * 0.5f;
@@ -761,13 +771,10 @@ public class PongCircleGame : MonoBehaviour
       return angle;
     }
 
-    float ClampAngle(float angle, float startAngle, float endAngle) {
-      float center = Mathf.LerpAngle(startAngle, endAngle, 0.5f);
-      float halfSize = Mathf.Abs(Mathf.DeltaAngle(startAngle, endAngle)) * 0.5f;
-      float delta = Mathf.Clamp(Mathf.DeltaAngle(center, angle), -halfSize, halfSize);
-      return center + delta;
-    }
-
+    // Borne l'angle de la raquette pour qu'elle reste ENTIÈREMENT dans son secteur.
+    // On retire la demi-largeur de la raquette (paddleHalfSize) à la demi-largeur du
+    // secteur : le centre de la raquette ne peut donc pas s'approcher du bord à moins
+    // d'une demi-raquette, sinon elle déborderait sur le secteur voisin.
     float ClampPaddleAngle(float angle, float startAngle, float endAngle) {
       float center = Mathf.LerpAngle(startAngle, endAngle, 0.5f);
       float sectorHalfSize = Mathf.Abs(Mathf.DeltaAngle(startAngle, endAngle)) * 0.5f;
@@ -808,6 +815,11 @@ public class PongCircleGame : MonoBehaviour
       return null;
     }
 
+    // Répartition équitable du cercle entre les joueurs vivants.
+    // À chaque élimination, on recalcule : le cercle (360°) est divisé en parts
+    // égales (360 / nbVivants), chaque joueur reçoit un secteur centré sur
+    // aliveIndex * sectorSize. Les secteurs restants s'agrandissent donc à mesure
+    // que des joueurs sont éliminés. La raquette est re-bornée dans son nouveau secteur.
     void RedistributeAlivePlayers() {
       ClearSectors();
 
@@ -825,7 +837,6 @@ public class PongCircleGame : MonoBehaviour
         }
 
         float sectorCenter = aliveIndex * sectorSize;
-        player.SectorIndex = aliveIndex;
         player.SectorStartAngle = sectorCenter - sectorSize * 0.5f;
         player.SectorEndAngle = sectorCenter + sectorSize * 0.5f;
         if (player.PaddleObject != null && !player.PaddleObject.activeSelf) {
@@ -904,7 +915,8 @@ public class PongCircleGame : MonoBehaviour
           Id = player.Id,
           Name = player.Name,
           Color = player.Color,
-          IsAlive = player.IsAlive
+          IsAlive = player.IsAlive,
+          Score = player.Score
         });
       }
 
@@ -927,9 +939,6 @@ public class PongCircleGame : MonoBehaviour
       }
 
       players[index].Name = name;
-      if (index < profiles.Count) {
-        profiles[index].Name = name;
-      }
     }
 
     public void CyclePlayerColor(int index) {
@@ -945,15 +954,16 @@ public class PongCircleGame : MonoBehaviour
       color.a = SectorAlpha;
 
       player.Color = color;
-      if (index < profiles.Count) {
-        profiles[index].Color = color;
-      }
-
       ApplyPlayerColor(player);
     }
 
     const float MinHueDistance = 0.04f;
 
+    // Recherche gloutonne d'une teinte (hue) libre sur le cercle chromatique :
+    // on avance par pas fixe (step) jusqu'à trouver une teinte distante d'au moins
+    // MinHueDistance de toutes les couleurs déjà prises, pour que les zones des
+    // joueurs restent visuellement distinctes. Bornée à 32 essais pour éviter toute
+    // boucle infinie ; à défaut on renvoie simplement startHue + step.
     float FindFreeHue(float startHue, int excludeIndex) {
       const float step = 0.08f;
       float hue = startHue;
@@ -1019,7 +1029,7 @@ public class PongCircleGame : MonoBehaviour
       }
     }
 
-    // Applique une couleur de zone choisie par l'utilisateur (côté client).
+    // Applique une couleur de zone choisie par l'utilisateur.
     public void SetPlayerColor(int index, Color color) {
       if (index < 0 || index >= players.Count) {
         return;
@@ -1028,10 +1038,6 @@ public class PongCircleGame : MonoBehaviour
       color.a = SectorAlpha;
       CirclePlayer player = players[index];
       player.Color = color;
-      if (index < profiles.Count) {
-        profiles[index].Color = color;
-      }
-
       ApplyPlayerColor(player);
     }
 
@@ -1066,6 +1072,7 @@ public class PongCircleGame : MonoBehaviour
       public string Name;
       public Color Color;
       public bool IsAlive;
+      public int Score;
     }
 
     class PlayerProfile
@@ -1077,16 +1084,25 @@ public class PongCircleGame : MonoBehaviour
     class CirclePlayer
     {
       public int Id;
-      public string Name;
-      public int SectorIndex;
+      public PlayerProfile Profile;
       public int Score;
       public bool IsAlive = true;
       public bool HasPaddleAngle;
       public float SectorStartAngle;
       public float SectorEndAngle;
       public float PaddleAngle;
-      public Color Color;
       public GameObject SectorObject;
       public GameObject PaddleObject;
+
+      // Identité (nom + couleur) déléguée au profil persistant :
+      public string Name {
+        get { return Profile.Name; }
+        set { Profile.Name = value; }
+      }
+
+      public Color Color {
+        get { return Profile.Color; }
+        set { Profile.Color = value; }
+      }
     }
 }

@@ -29,6 +29,13 @@ public class PongCircleGame : MonoBehaviour
     public bool NetworkControlled = false;
     public GameObject Ball;
 
+    [Header("Réseau — lissage (réduction de latence ressentie)")]
+    public bool NetworkSmoothing = true;
+    public bool LocalPaddlePrediction = true;
+    public float PaddleSmoothingSpeed = 14f;   
+    public float PaddleReconcileSpeed = 2f;     
+    public float BallSmoothingSpeed = 12f;      
+
     public int CurrentPlayerCount {
       get {
         return players.Count;
@@ -72,6 +79,13 @@ public class PongCircleGame : MonoBehaviour
     float countdownRemaining;
     int winnerId;
     string status = "Playing";
+
+    // État réseau pour l'interpolation/prédiction (Update les consomme entre 2 snapshots).
+    int networkLocalPlayerId;
+    float networkLocalDirection;
+    Vector2 netBallPosition;
+    Vector2 netBallDirection;
+    bool hasNetworkBall;
 
     void OnEnable() {
       if (!Application.isPlaying) {
@@ -136,10 +150,11 @@ public class PongCircleGame : MonoBehaviour
         UpdateLobbyCountdown();
       }
 
-      // En réseau, le serveur fait autorité : pas de simulation locale.
       if (!NetworkControlled) {
         UpdatePaddles();
         UpdateBall();
+      } else if (NetworkSmoothing) {
+        UpdateNetworkInterpolation();
       }
     }
 
@@ -147,8 +162,44 @@ public class PongCircleGame : MonoBehaviour
       NetworkControlled = networkControlled;
     }
 
+    public void SetLocalPredictedInput(float direction) {
+      networkLocalDirection = Mathf.Clamp(direction, -1f, 1f);
+    }
+
+    void UpdateNetworkInterpolation() {
+      if (!gameStarted || gameOver) {
+        return;
+      }
+
+      float dt = Time.deltaTime;
+
+      if (Ball != null && hasNetworkBall) {
+        netBallPosition += netBallDirection * BallSpeed * dt;
+        Vector3 target = new Vector3(netBallPosition.x, netBallPosition.y, ballStartPosition.z);
+        float ballK = 1f - Mathf.Exp(-BallSmoothingSpeed * dt);
+        Ball.transform.position = Vector3.Lerp(Ball.transform.position, target, ballK);
+      }
+
+      float remoteK = 1f - Mathf.Exp(-PaddleSmoothingSpeed * dt);
+      float reconcileK = 1f - Mathf.Exp(-PaddleReconcileSpeed * dt);
+      foreach (CirclePlayer player in players) {
+        if (!player.IsAlive) {
+          continue;
+        }
+
+        if (LocalPaddlePrediction && player.Id == networkLocalPlayerId) {
+          player.PaddleAngle += networkLocalDirection * PaddleAngularSpeed * dt;
+          player.PaddleAngle = Mathf.LerpAngle(player.PaddleAngle, player.PaddleAngleTarget, reconcileK);
+          player.PaddleAngle = ClampPaddleAngle(player.PaddleAngle, player.SectorStartAngle, player.SectorEndAngle);
+        } else {
+          player.PaddleAngle = Mathf.LerpAngle(player.PaddleAngle, player.PaddleAngleTarget, remoteK);
+        }
+      }
+
+      UpdatePaddleTransforms();
+    }
+
     void UpdateLobbyCountdown() {
-      // Démarrage auto : 4 joueurs minimum ET tous prêts → compte à rebours.
       if (!CanStart) {
         if (countdownActive) {
           countdownActive = false;
@@ -305,6 +356,7 @@ public class PongCircleGame : MonoBehaviour
       }
 
       NetworkControlled = true;
+      networkLocalPlayerId = snapshot.localPlayerId;
 
       int snapshotPlayerCount = Mathf.Clamp(snapshot.playerCount, MinimumPlayers, MaximumPlayers);
       if (players.Count != snapshotPlayerCount) {
@@ -315,7 +367,9 @@ public class PongCircleGame : MonoBehaviour
       gameStarted = snapshot.gameStarted;
       gameOver = snapshot.gameOver;
       winnerId = snapshot.winnerId;
-      status = string.IsNullOrEmpty(snapshot.status) ? "Network sync" : snapshot.status;
+      if (!string.IsNullOrEmpty(snapshot.status)) {
+        status = snapshot.status;
+      }
 
       if (snapshot.players != null) {
         foreach (PongCircleNetworkPlayerState playerState in snapshot.players) {
@@ -325,7 +379,12 @@ public class PongCircleGame : MonoBehaviour
           }
 
           player.IsAlive = playerState.alive;
-          player.PaddleAngle = playerState.paddleAngle;
+          // Cible réseau autoritative ; le lissage (Update) rapproche PaddleAngle de
+          // cette cible. Au 1er snapshot (ou lissage désactivé), on cale directement.
+          player.PaddleAngleTarget = playerState.paddleAngle;
+          if (!player.HasPaddleAngle || !NetworkSmoothing) {
+            player.PaddleAngle = playerState.paddleAngle;
+          }
           player.HasPaddleAngle = true;
           if (player.PaddleObject != null) {
             player.PaddleObject.SetActive(player.IsAlive);
@@ -344,10 +403,17 @@ public class PongCircleGame : MonoBehaviour
 
       RedistributeAlivePlayers();
 
+      Vector2 authoritativeBall = new Vector2(snapshot.ballX, snapshot.ballY);
+      bool ballActive = gameStarted && !gameOver;
       if (Ball != null) {
-        Ball.SetActive(gameStarted && !gameOver);
-        Ball.transform.position = new Vector3(snapshot.ballX, snapshot.ballY, ballStartPosition.z);
+        Ball.SetActive(ballActive);
+        if (!NetworkSmoothing || !hasNetworkBall) {
+          Ball.transform.position = new Vector3(authoritativeBall.x, authoritativeBall.y, ballStartPosition.z);
+        }
       }
+      netBallPosition = authoritativeBall;
+      netBallDirection = new Vector2(snapshot.ballDirX, snapshot.ballDirY);
+      hasNetworkBall = ballActive;
     }
 
     void BuildArena(int playerCount) {
@@ -845,9 +911,11 @@ public class PongCircleGame : MonoBehaviour
 
         if (!player.HasPaddleAngle) {
           player.PaddleAngle = sectorCenter;
+          player.PaddleAngleTarget = sectorCenter;
           player.HasPaddleAngle = true;
         } else {
           player.PaddleAngle = ClampPaddleAngle(player.PaddleAngle, player.SectorStartAngle, player.SectorEndAngle);
+          player.PaddleAngleTarget = ClampPaddleAngle(player.PaddleAngleTarget, player.SectorStartAngle, player.SectorEndAngle);
         }
 
         player.SectorObject = CreateSector("Sector_Player_" + player.Id, player.SectorStartAngle, player.SectorEndAngle, player.Color);
@@ -1091,6 +1159,7 @@ public class PongCircleGame : MonoBehaviour
       public float SectorStartAngle;
       public float SectorEndAngle;
       public float PaddleAngle;
+      public float PaddleAngleTarget;   
       public GameObject SectorObject;
       public GameObject PaddleObject;
 

@@ -88,6 +88,8 @@ public class PongCircleUdpClient : MonoBehaviour
     float joinRetryEndTime;
     float onScreenDirection;
     float onScreenDirectionTime;
+    float lastSentDirection = 999f;
+    int redundantSendsLeft;
 
     void Awake() {
       EnsureCircleGame();
@@ -116,12 +118,29 @@ public class PongCircleUdpClient : MonoBehaviour
 
       RetryJoinIfNeeded();
 
-      if (localPlayerId <= 0 || Time.time < nextInputSendTime) {
+      if (localPlayerId <= 0) {
         return;
       }
 
-      nextInputSendTime = Time.time + (1 / Mathf.Max(1, InputSendRate));
-      SendInput(ReadLocalDirection());
+      float direction = ReadLocalDirection();
+
+      EnsureCircleGame();
+      if (CircleGame != null) {
+        CircleGame.SetLocalPredictedInput(direction);
+      }
+
+      float spacing = 1f / Mathf.Max(1f, InputSendRate);
+      bool changed = Mathf.Abs(direction - lastSentDirection) > 0.01f;
+      if (changed) {
+        SendInput(direction);
+        lastSentDirection = direction;
+        redundantSendsLeft = 2;
+        nextInputSendTime = Time.time + spacing;
+      } else if (redundantSendsLeft > 0 && Time.time >= nextInputSendTime) {
+        SendInput(direction);
+        redundantSendsLeft--;
+        nextInputSendTime = Time.time + spacing;
+      }
     }
 
     void OnDisable() {
@@ -271,8 +290,12 @@ public class PongCircleUdpClient : MonoBehaviour
       readyPlayerCount = snapshot.readyPlayerCount;
       replayVoteCount = snapshot.replayVoteCount;
       postGameRemainingSeconds = snapshot.postGameRemainingSeconds;
-      devices = snapshot.devices ?? new PongCircleNetworkDeviceState[0];
-      lobbyDevices = snapshot.lobbyDevices ?? new PongCircleNetworkDeviceState[0];
+      if (snapshot.devices != null) {
+        devices = snapshot.devices;
+      }
+      if (snapshot.lobbyDevices != null) {
+        lobbyDevices = snapshot.lobbyDevices;
+      }
       lastStatus = localPlayerId > 0 ? "UDP player " + localPlayerId : "UDP lobby";
 
       if (localPlayerId > 0) {

@@ -659,9 +659,10 @@ function resetBall() {
   game.ballDirY = direction.y;
 }
 
-function buildSnapshot(client) {
+
+function buildSnapshot(client, full = true) {
   const alivePlayerCount = game.players.filter((player) => player.alive).length;
-  return {
+  const snapshot = {
     type: "state",
     localPlayerId: client ? client.playerId : 0,
     lobbyOpen: game.lobbyOpen,
@@ -676,24 +677,46 @@ function buildSnapshot(client) {
     postGameRemainingSeconds: game.gameOver && game.postGameDeadline > 0
       ? Math.max(0, Math.ceil((game.postGameDeadline - Date.now()) / 1000))
       : 0,
-    status: game.status,
     ballX: round(game.ballX),
     ballY: round(game.ballY),
     ballDirX: round(game.ballDirX),
     ballDirY: round(game.ballDirY),
-    devices: buildDeviceList(),
-    lobbyDevices: buildLobbyDeviceList(),
     players: game.players.map((player) => {
       const owner = clientForPlayerId(player.id);
       return {
         id: player.id,
         alive: player.alive,
         paddleAngle: round(player.paddleAngle),
-        name: owner ? clientLabel(owner) : "",
-        color: owner ? owner.color : ""
+        name: full && owner ? clientLabel(owner) : "",
+        color: full && owner ? owner.color : ""
       };
     })
   };
+
+  if (full) {
+    snapshot.status = game.status;
+    snapshot.devices = buildDeviceList();
+    snapshot.lobbyDevices = buildLobbyDeviceList();
+  }
+
+  return snapshot;
+}
+
+function metaSignature() {
+  const devs = buildDeviceList()
+    .map((d) => d.playerId + ":" + d.name + ":" + d.ready + ":" + d.color)
+    .join("|");
+  const lobby = buildLobbyDeviceList()
+    .map((d) => d.name + ":" + d.color)
+    .join("|");
+  const identities = game.players
+    .map((p) => {
+      const owner = clientForPlayerId(p.id);
+      return p.id + ":" + (owner ? clientLabel(owner) : "") + ":" + (owner ? owner.color : "");
+    })
+    .join("|");
+  return devs + "#" + lobby + "#" + identities + "#" + game.status
+    + "#" + game.lobbyOpen + game.gameStarted + game.gameOver + game.winnerId;
 }
 
 function clientForPlayerId(playerId) {
@@ -729,14 +752,25 @@ function buildLobbyDeviceList() {
     }));
 }
 
+let lastMetaSignature = "";
+let lastFullBroadcastTime = 0;
+
 function broadcastSnapshot() {
+  const signature = metaSignature();
+  const now = Date.now();
+  const full = signature !== lastMetaSignature || (now - lastFullBroadcastTime) >= 1000;
+  if (full) {
+    lastMetaSignature = signature;
+    lastFullBroadcastTime = now;
+  }
+
   for (const client of clientsByDevice.values()) {
-    sendSnapshot(client);
+    sendSnapshot(client, full);
   }
 }
 
-function sendSnapshot(client) {
-  const message = Buffer.from(JSON.stringify(buildSnapshot(client)));
+function sendSnapshot(client, full = true) {
+  const message = Buffer.from(JSON.stringify(buildSnapshot(client, full)));
   socket.send(message, client.port, client.address);
 }
 

@@ -57,6 +57,10 @@ public class PongCircleUdpClient : MonoBehaviour
       get { return postGameRemainingSeconds; }
     }
 
+    public int StartCountdownSeconds {
+      get { return startCountdownSeconds; }
+    }
+
     UdpClient udp;
     IPEndPoint serverEndPoint;
     Thread receiveThread;
@@ -74,6 +78,7 @@ public class PongCircleUdpClient : MonoBehaviour
     int readyPlayerCount;
     int replayVoteCount;
     int postGameRemainingSeconds;
+    int startCountdownSeconds;
     int sequence;
     PongCircleNetworkDeviceState[] devices = new PongCircleNetworkDeviceState[0];
     PongCircleNetworkDeviceState[] lobbyDevices = new PongCircleNetworkDeviceState[0];
@@ -290,6 +295,7 @@ public class PongCircleUdpClient : MonoBehaviour
       readyPlayerCount = snapshot.readyPlayerCount;
       replayVoteCount = snapshot.replayVoteCount;
       postGameRemainingSeconds = snapshot.postGameRemainingSeconds;
+      startCountdownSeconds = snapshot.startCountdownSeconds;
       if (snapshot.devices != null) {
         devices = snapshot.devices;
       }

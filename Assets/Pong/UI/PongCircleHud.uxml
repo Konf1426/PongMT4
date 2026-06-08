@@ -18,6 +18,7 @@
             <ui:Label text="" name="join-network" class="info" />
             <ui:Label text="" name="join-players" class="info" />
             <ui:Label text="" name="join-min" class="info" />
+            <ui:Label text="" name="join-countdown" class="info info--accent" />
             <ui:VisualElement name="join-devices" class="device-list" />
             <ui:VisualElement name="join-lobby-devices" class="device-list" />
             <ui:Label text="" name="join-hint" class="hint" />

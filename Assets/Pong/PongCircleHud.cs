@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.UIElements;
 
@@ -16,7 +17,7 @@ public class PongCircleHud : MonoBehaviour
 
     // Join panel
     Button btnJoin;
-    Label joinTitle, joinSubtitle, joinYourPlayer, joinNetwork, joinPlayers, joinMin, joinHint;
+    Label joinTitle, joinSubtitle, joinYourPlayer, joinNetwork, joinPlayers, joinMin, joinHint, joinCountdown;
     VisualElement joinDevices, joinLobbyDevices;
 
     // Local lobby panel
@@ -63,10 +64,6 @@ public class PongCircleHud : MonoBehaviour
     void OnEnable()
     {
         launcher = FindFirstObjectByType<PongCircleLauncher>(FindObjectsInactive.Include);
-        if (launcher != null)
-        {
-            launcher.HideImguiUi = true;
-        }
     }
 
     void Start()
@@ -97,6 +94,7 @@ public class PongCircleHud : MonoBehaviour
         joinPlayers = root.Q<Label>("join-players");
         joinMin = root.Q<Label>("join-min");
         joinHint = root.Q<Label>("join-hint");
+        joinCountdown = root.Q<Label>("join-countdown");
         joinDevices = root.Q<VisualElement>("join-devices");
         joinLobbyDevices = root.Q<VisualElement>("join-lobby-devices");
         btnJoin = root.Q<Button>("btn-join");
@@ -234,6 +232,10 @@ public class PongCircleHud : MonoBehaviour
         SetText(joinMin, "Minimum pour lancer : " + Game.MinimumPlayers);
         Show(joinMin, !Game.IsGameStarted);
 
+        int countdown = StartCountdownSeconds();
+        Show(joinCountdown, countdown > 0);
+        if (countdown > 0) SetText(joinCountdown, "Démarrage dans " + countdown + " s…");
+
         Show(joinYourPlayer, localId > 0);
         if (localId > 0) SetText(joinYourPlayer, "Votre joueur : " + localId);
 
@@ -243,6 +245,7 @@ public class PongCircleHud : MonoBehaviour
 
         RebuildInGameDevices(joinDevices, ref sigJoinDevices);
         RebuildLobbyDevices(joinLobbyDevices, ref sigJoinLobby);
+        RefreshSwatchAvailability();
     }
 
     // --- Identité du joueur (nom + couleur de zone) ---
@@ -288,6 +291,38 @@ public class PongCircleHud : MonoBehaviour
         {
             child.EnableInClassList("color-swatch--selected", i == chosenColorIndex);
             i++;
+        }
+    }
+
+    // Grise les couleurs déjà utilisées par d'autres joueurs (la mienne reste cliquable).
+    // Double sécurité avec le refus côté serveur, et empêche le clic en amont.
+    void RefreshSwatchAvailability()
+    {
+        if (colorRow == null) return;
+
+        HashSet<string> taken = new HashSet<string>();
+        CollectColors(taken, NetworkDevices());
+        CollectColors(taken, NetworkLobbyDevices());
+
+        int i = 0;
+        foreach (VisualElement child in colorRow.Children())
+        {
+            string hex = ColorUtility.ToHtmlStringRGB(Palette[i]);
+            bool blocked = i != chosenColorIndex && taken.Contains(hex);
+            child.SetEnabled(!blocked);
+            i++;
+        }
+    }
+
+    static void CollectColors(HashSet<string> set, PongCircleNetworkDeviceState[] devices)
+    {
+        if (devices == null) return;
+        foreach (PongCircleNetworkDeviceState d in devices)
+        {
+            if (d != null && !string.IsNullOrEmpty(d.color))
+            {
+                set.Add(d.color.ToUpperInvariant());
+            }
         }
     }
 
@@ -466,7 +501,8 @@ public class PongCircleHud : MonoBehaviour
         foreach (PongCircleNetworkDeviceState d in devices)
         {
             if (d == null || d.playerId <= 0) continue;
-            container.Add(MakeListLabel("P" + d.playerId + " - " + d.name, false));
+            container.Add(MakeListLabel(
+                "P" + d.playerId + " - " + d.name + "   " + d.lives + " vies   " + d.points + " pts", false));
         }
     }
 
@@ -495,7 +531,8 @@ public class PongCircleHud : MonoBehaviour
         foreach (PongCircleNetworkDeviceState d in devices)
         {
             if (d == null) continue;
-            sb.Append(d.playerId).Append(':').Append(d.name).Append(';');
+            sb.Append(d.playerId).Append(':').Append(d.name)
+              .Append(':').Append(d.lives).Append(':').Append(d.points).Append(';');
         }
         return sb.ToString();
     }
@@ -516,6 +553,7 @@ public class PongCircleHud : MonoBehaviour
     int ConnectedPlayerCount() => ShouldUseUdp() ? Udp.ConnectedPlayerCount : 0;
     int ReplayVoteCount() => ShouldUseUdp() ? Udp.ReplayVoteCount : 0;
     int PostGameRemainingSeconds() => ShouldUseUdp() ? Udp.PostGameRemainingSeconds : 0;
+    int StartCountdownSeconds() => ShouldUseUdp() ? Udp.StartCountdownSeconds : 0;
     bool IsNetworkConnected() => ShouldUseUdp() && Udp.IsConnected;
     bool ShouldShowMobileControls() => ShouldUseUdp() && Udp.ShouldShowMobileControls();
     string NetworkStatus() => ShouldUseUdp() ? Udp.LastStatus : "Hors ligne";

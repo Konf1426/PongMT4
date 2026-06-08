@@ -1,5 +1,7 @@
 const dgram = require("dgram");
 const http = require("http");
+const fs = require("fs");
+const path = require("path");
 
 const UDP_PORT = Number(process.env.UDP_PORT || 41234);
 const HEALTH_PORT = Number(process.env.UDP_HEALTH_PORT || 8082);
@@ -13,6 +15,17 @@ const paddleAimInfluence = 0.45;
 const minimumPlayers = 2;
 const maximumPlayers = 10;
 const clientTimeoutMs = 10000;
+
+
+const startCountdownMs = 10000;    
+const joinGraceMs = 2000;         
+const startCountdownMaxMs = 15000;  
+
+const startingLives = 3;
+
+const survivalPoints = 1;          
+const winBonusPoints = 3;           
+const scoresFilePath = path.join(__dirname, "scores.json");
 
 const socket = dgram.createSocket("udp4");
 const clientsByDevice = new Map();
@@ -32,12 +45,97 @@ const game = {
   gameOver: false,
   replayVoteCount: 0,
   postGameDeadline: 0,
+  startDeadline: 0,
+  countdownPlayerCount: 0,
   winnerId: 0,
   status: "Waiting for someone to start a game"
 };
 
 let nextClientId = 1;
 let lastTick = Date.now();
+
+const scoreboard = loadScores();
+let scoresDirty = false;
+
+function loadScores() {
+  try {
+    const data = JSON.parse(fs.readFileSync(scoresFilePath, "utf8"));
+    const map = new Map();
+    if (Array.isArray(data)) {
+      for (const entry of data) {
+        if (entry && entry.deviceId) {
+          map.set(entry.deviceId, {
+            name: entry.name || "",
+            points: entry.points || 0,
+            wins: entry.wins || 0,
+            games: entry.games || 0
+          });
+        }
+      }
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function getScoreEntry(deviceId, name) {
+  let entry = scoreboard.get(deviceId);
+  if (!entry) {
+    entry = { name: name || "", points: 0, wins: 0, games: 0 };
+    scoreboard.set(deviceId, entry);
+  }
+  if (name) {
+    entry.name = name;
+  }
+  return entry;
+}
+
+function awardPoints(player, amount) {
+  const owner = clientForPlayerId(player.id);
+  if (!owner) {
+    return;
+  }
+  getScoreEntry(owner.deviceId, clientLabel(owner)).points += amount;
+  scoresDirty = true;
+}
+
+function pointsForPlayer(player) {
+  const owner = clientForPlayerId(player.id);
+  if (!owner) {
+    return 0;
+  }
+  const entry = scoreboard.get(owner.deviceId);
+  return entry ? entry.points : 0;
+}
+
+function flushScores() {
+  if (!scoresDirty) {
+    return;
+  }
+  scoresDirty = false;
+  const data = Array.from(scoreboard.entries()).map(([deviceId, entry]) => ({
+    deviceId,
+    name: entry.name,
+    points: entry.points,
+    wins: entry.wins,
+    games: entry.games
+  }));
+  fs.writeFile(scoresFilePath, JSON.stringify(data, null, 2), () => {});
+}
+
+function buildScoreboard() {
+  return Array.from(scoreboard.values())
+    .filter((entry) => entry.games > 0 || entry.points > 0)
+    .sort((a, b) => b.points - a.points || b.wins - a.wins)
+    .slice(0, 10)
+    .map((entry) => ({
+      name: entry.name || "Anonyme",
+      points: entry.points,
+      wins: entry.wins,
+      games: entry.games
+    }));
+}
 
 socket.on("message", (buffer, remote) => {
   let envelope;
@@ -60,7 +158,12 @@ socket.on("message", (buffer, remote) => {
   if (displayName) {
     client.displayName = displayName;
   }
-  client.color = sanitizeColor(envelope.color || payload.color || "");
+  // Unicité des couleurs : on n'applique une couleur demandée que si aucun autre
+  // joueur connecté ne l'utilise déjà (sinon on garde l'actuelle).
+  const requestedColor = sanitizeColor(envelope.color || payload.color || "");
+  if (!requestedColor || !isColorTakenByOther(requestedColor, client)) {
+    client.color = requestedColor;
+  }
 
   if (payload.type === "hello") {
     sendSnapshot(client);
@@ -128,7 +231,8 @@ http.createServer((req, res) => {
     winnerId: game.winnerId,
     status: game.status,
     devices: buildDeviceList(),
-    lobbyDevices: buildLobbyDeviceList()
+    lobbyDevices: buildLobbyDeviceList(),
+    scoreboard: buildScoreboard()
   }));
 }).listen(HEALTH_PORT, "0.0.0.0");
 
@@ -189,6 +293,17 @@ function sanitizeDeviceName(deviceName) {
 
 function sanitizeColor(value) {
   return String(value || "").replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
+}
+
+// Vrai si un autre joueur connecté utilise déjà cette couleur (comparaison insensible à la casse).
+function isColorTakenByOther(color, self) {
+  const target = color.toLowerCase();
+  for (const client of getConnectedClients()) {
+    if (client !== self && client.color && client.color.toLowerCase() === target) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function clientLabel(client) {
@@ -300,9 +415,6 @@ function assignLobbyPlayers() {
   resetBall();
   updateStatus();
 
-  if (game.lobbyOpen && readyClients.length >= minimumPlayers) {
-    beginMatch();
-  }
 }
 
 function beginMatch() {
@@ -311,16 +423,27 @@ function beginMatch() {
   game.gameOver = false;
   game.replayVoteCount = 0;
   game.postGameDeadline = 0;
+  game.startDeadline = 0;
   game.winnerId = 0;
   game.status = "Playing";
 
   for (const player of game.players) {
     player.alive = true;
     player.hasPaddleAngle = false;
+    player.lives = startingLives;
   }
 
   for (const client of clientsByDevice.values()) {
     client.wantsReplay = false;
+  }
+
+  // Score persistant
+  for (const player of game.players) {
+    const owner = clientForPlayerId(player.id);
+    if (owner) {
+      getScoreEntry(owner.deviceId, clientLabel(owner)).games += 1;
+      scoresDirty = true;
+    }
   }
 
   redistributeAlivePlayers();
@@ -361,6 +484,7 @@ function rebuildPlayersForReadyClients(readyClients, preserveExistingPlayers) {
       id: playerId,
       alive: true,
       hasPaddleAngle: false,
+      lives: startingLives,
       paddleAngle: 0,
       input: 0,
       sectorStartAngle: 0,
@@ -386,10 +510,41 @@ function tick() {
 
   cleanupClients();
   reconcileGameState();
+  updateStartCountdown();
   updateInputs();
   updatePostGameTimeout();
   updatePaddles(deltaTime);
   updateBall(deltaTime);
+}
+
+
+function updateStartCountdown() {
+  if (game.gameOver || game.gameStarted) {
+    game.startDeadline = 0;
+    return;
+  }
+
+  const readyCount = getReadyClients().length;
+  if (!game.lobbyOpen || readyCount < minimumPlayers) {
+    game.startDeadline = 0;
+    return;
+  }
+
+  const now = Date.now();
+  if (game.startDeadline <= 0) {
+    game.startDeadline = now + startCountdownMs;
+    game.countdownPlayerCount = readyCount;
+  } else if (readyCount > game.countdownPlayerCount) {
+    game.startDeadline = Math.min(now + startCountdownMaxMs, game.startDeadline + joinGraceMs);
+    game.countdownPlayerCount = readyCount;
+  }
+
+  if (now >= game.startDeadline) {
+    beginMatch();
+    return;
+  }
+
+  updateStatus();
 }
 
 function cleanupClients() {
@@ -507,8 +662,22 @@ function updateBall(deltaTime) {
   if (paddleDelta <= paddleArcDegrees * 0.5) {
     bounceOnPaddle(defender, angle);
   } else {
-    eliminatePlayer(defender);
+    concedeGoal(defender);
   }
+}
+
+// Une balle ratée coûte une vie ; l'élimination réelle n'arrive qu'à 0 vie.
+// Évite les parties qui se terminent dès le premier raté.
+function concedeGoal(defender) {
+  defender.lives -= 1;
+
+  if (defender.lives <= 0) {
+    eliminatePlayer(defender);
+    return;
+  }
+
+  game.status = `Player ${defender.id} lost a life (${defender.lives} left)`;
+  resetBall();
 }
 
 function updateStatus() {
@@ -525,6 +694,11 @@ function updateStatus() {
   }
 
   if (game.lobbyOpen) {
+    if (game.startDeadline > 0) {
+      const seconds = Math.max(0, Math.ceil((game.startDeadline - Date.now()) / 1000));
+      game.status = `Starting in ${seconds}s — ${game.readyPlayerCount} ready`;
+      return;
+    }
     game.status = `Lobby open: ${game.readyPlayerCount}/${minimumPlayers} ready, max ${maximumPlayers}`;
     return;
   }
@@ -588,17 +762,36 @@ function bounceOnPaddle(defender, impactAngle) {
 
 function eliminatePlayer(player) {
   player.alive = false;
+
+  // Score de survie 
+  for (const survivor of game.players) {
+    if (survivor.alive) {
+      awardPoints(survivor, survivalPoints);
+    }
+  }
+
   const alivePlayers = game.players.filter((candidate) => candidate.alive);
 
   if (alivePlayers.length <= 1) {
-    game.winnerId = alivePlayers[0] ? alivePlayers[0].id : 0;
+    const winner = alivePlayers[0] || null;
+    game.winnerId = winner ? winner.id : 0;
+    if (winner) {
+      awardPoints(winner, winBonusPoints);
+      const owner = clientForPlayerId(winner.id);
+      if (owner) {
+        getScoreEntry(owner.deviceId, clientLabel(owner)).wins += 1;
+        scoresDirty = true;
+      }
+    }
     game.gameOver = true;
     game.gameStarted = false;
+    game.startDeadline = 0;
     game.replayVoteCount = 0;
     game.postGameDeadline = Date.now() + 30000;
     for (const client of clientsByDevice.values()) {
       client.wantsReplay = false;
     }
+    flushScores();
     updatePostGameStatus();
     return;
   }
@@ -677,6 +870,9 @@ function buildSnapshot(client, full = true) {
     postGameRemainingSeconds: game.gameOver && game.postGameDeadline > 0
       ? Math.max(0, Math.ceil((game.postGameDeadline - Date.now()) / 1000))
       : 0,
+    startCountdownSeconds: (!game.gameStarted && !game.gameOver && game.startDeadline > 0)
+      ? Math.max(0, Math.ceil((game.startDeadline - Date.now()) / 1000))
+      : 0,
     ballX: round(game.ballX),
     ballY: round(game.ballY),
     ballDirX: round(game.ballDirX),
@@ -686,6 +882,8 @@ function buildSnapshot(client, full = true) {
       return {
         id: player.id,
         alive: player.alive,
+        lives: player.lives,
+        points: pointsForPlayer(player),
         paddleAngle: round(player.paddleAngle),
         name: full && owner ? clientLabel(owner) : "",
         color: full && owner ? owner.color : ""
@@ -704,7 +902,7 @@ function buildSnapshot(client, full = true) {
 
 function metaSignature() {
   const devs = buildDeviceList()
-    .map((d) => d.playerId + ":" + d.name + ":" + d.ready + ":" + d.color)
+    .map((d) => d.playerId + ":" + d.name + ":" + d.ready + ":" + d.color + ":" + d.lives + ":" + d.points)
     .join("|");
   const lobby = buildLobbyDeviceList()
     .map((d) => d.name + ":" + d.color)
@@ -732,12 +930,18 @@ function buildDeviceList() {
   return Array.from(clientsByDevice.values())
     .filter((client) => client.ready && client.playerId > 0)
     .sort((a, b) => a.playerId - b.playerId)
-    .map((client) => ({
-      playerId: client.playerId,
-      name: clientLabel(client),
-      ready: client.ready,
-      color: client.color
-    }));
+    .map((client) => {
+      const player = game.players[client.playerId - 1];
+      const entry = scoreboard.get(client.deviceId);
+      return {
+        playerId: client.playerId,
+        name: clientLabel(client),
+        ready: client.ready,
+        color: client.color,
+        lives: player ? player.lives : 0,
+        points: entry ? entry.points : 0
+      };
+    });
 }
 
 function buildLobbyDeviceList() {
@@ -823,3 +1027,4 @@ function round(value) {
 assignLobbyPlayers();
 setInterval(tick, 1000 / 60);
 setInterval(broadcastSnapshot, 1000 / 30);
+setInterval(flushScores, 5000);

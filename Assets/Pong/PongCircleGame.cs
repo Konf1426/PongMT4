@@ -513,13 +513,19 @@ public class PongCircleGame : MonoBehaviour
       return CreateMaterial(color, 0f);
     }
 
-    Material CreateMaterial(Color color, float emission) {
-      Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-      if (shader == null) {
-        shader = Shader.Find("Standard");
+    Shader ResolveShader(params string[] names) {
+      foreach (string name in names) {
+        Shader shader = Shader.Find(name);
+        if (shader != null) {
+          return shader;
+        }
       }
 
-      Material material = new Material(shader);
+      return Shader.Find("Hidden/InternalErrorShader");
+    }
+
+    Material CreateMaterial(Color color, float emission) {
+      Material material = new Material(ResolveShader("Universal Render Pipeline/Lit", "Standard"));
       material.color = color;
       if (material.HasProperty("_BaseColor")) {
         material.SetColor("_BaseColor", color);
@@ -549,12 +555,7 @@ public class PongCircleGame : MonoBehaviour
     }
 
     Material CreateUnlitHdrMaterial(Color color, float intensity) {
-      Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-      if (shader == null) {
-        shader = Shader.Find("Unlit/Color");
-      }
-
-      Material material = new Material(shader);
+      Material material = new Material(ResolveShader("Universal Render Pipeline/Unlit", "Unlit/Color"));
       Color hdr = color.linear * intensity;
       if (material.HasProperty("_BaseColor")) {
         material.SetColor("_BaseColor", hdr);
@@ -1159,7 +1160,7 @@ public class PongCircleGame : MonoBehaviour
       public float SectorStartAngle;
       public float SectorEndAngle;
       public float PaddleAngle;
-      public float PaddleAngleTarget;   
+      public float PaddleAngleTarget;
       public GameObject SectorObject;
       public GameObject PaddleObject;
 

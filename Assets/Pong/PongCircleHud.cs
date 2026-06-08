@@ -228,7 +228,11 @@ public class PongCircleHud : MonoBehaviour
 
     void RefreshJoin(int localId)
     {
-        SetText(btnJoin, Game.IsGameStarted ? "Rejoindre la partie" : "Jouer / Rejoindre");
+        bool pendingJoin = LocalPendingJoin();
+        SetText(btnJoin, pendingJoin
+            ? "Entrée dans " + PendingJoinRemainingSeconds() + "s"
+            : Game.IsGameStarted ? "Rejoindre la partie" : "Jouer / Rejoindre");
+        SetEnabled(btnJoin, !pendingJoin);
         SetText(joinNetwork, "Réseau : " + NetworkStatus());
         SetText(joinPlayers, "Joueurs : " + ConnectedPlayerCount() + " / " + Game.MaximumPlayers);
         SetText(joinMin, "Minimum pour lancer : " + Game.MinimumPlayers);
@@ -237,9 +241,20 @@ public class PongCircleHud : MonoBehaviour
         Show(joinYourPlayer, localId > 0);
         if (localId > 0) SetText(joinYourPlayer, "Votre joueur : " + localId);
 
-        SetText(joinHint, localId > 0
-            ? "La partie se lance quand assez de joueurs ont rejoint."
-            : "Tu es dans le menu tant que tu n'as pas rejoint la partie.");
+        if (LocalPendingJoin())
+        {
+            SetText(joinHint, "Tu rejoins la partie dans " + PendingJoinRemainingSeconds() + "s.");
+        }
+        else if (PendingJoinCount() > 0 && Game.IsGameStarted)
+        {
+            SetText(joinHint, PendingJoinCount() + " joueur(s) rejoignent dans " + PendingJoinRemainingSeconds() + "s.");
+        }
+        else
+        {
+            SetText(joinHint, localId > 0
+                ? "La partie se lance quand assez de joueurs ont rejoint."
+                : "Tu es dans le menu tant que tu n'as pas rejoint la partie.");
+        }
 
         RebuildInGameDevices(joinDevices, ref sigJoinDevices);
         RebuildLobbyDevices(joinLobbyDevices, ref sigJoinLobby);
@@ -516,6 +531,9 @@ public class PongCircleHud : MonoBehaviour
     int ConnectedPlayerCount() => ShouldUseUdp() ? Udp.ConnectedPlayerCount : 0;
     int ReplayVoteCount() => ShouldUseUdp() ? Udp.ReplayVoteCount : 0;
     int PostGameRemainingSeconds() => ShouldUseUdp() ? Udp.PostGameRemainingSeconds : 0;
+    int PendingJoinCount() => ShouldUseUdp() ? Udp.PendingJoinCount : 0;
+    int PendingJoinRemainingSeconds() => ShouldUseUdp() ? Udp.PendingJoinRemainingSeconds : 0;
+    bool LocalPendingJoin() => ShouldUseUdp() && Udp.LocalPendingJoin;
     bool IsNetworkConnected() => ShouldUseUdp() && Udp.IsConnected;
     bool ShouldShowMobileControls() => ShouldUseUdp() && Udp.ShouldShowMobileControls();
     string NetworkStatus() => ShouldUseUdp() ? Udp.LastStatus : "Hors ligne";

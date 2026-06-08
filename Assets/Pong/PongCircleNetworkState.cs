@@ -14,6 +14,9 @@ public class PongCircleNetworkSnapshot
     public bool gameStarted;
     public bool gameOver;
     public int replayVoteCount;
+    public int pendingJoinCount;
+    public int pendingJoinRemainingSeconds;
+    public bool localPendingJoin;
     public int postGameRemainingSeconds;
     public string status;
     public float ballX;

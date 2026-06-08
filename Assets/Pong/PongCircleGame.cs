@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.InputSystem.Controls;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -477,7 +476,7 @@ public class PongCircleGame : MonoBehaviour
       for (int i = 0; i <= arcSteps; i++) {
         float t = (float)i / arcSteps;
         float angle = Mathf.Lerp(startAngle, endAngle, t);
-        vertices[i + 1] = AngleToDirection(angle) * ArenaRadius;
+        vertices[i + 1] = PongCircleGeometry.AngleToDirection(angle) * ArenaRadius;
         vertices[i + 1].z = SectorZ;
       }
 
@@ -514,10 +513,13 @@ public class PongCircleGame : MonoBehaviour
     }
 
     Material CreateMaterial(Color color, float emission) {
-      Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-      if (shader == null) {
-        shader = Shader.Find("Standard");
-      }
+      Shader shader = FindFirstShader(
+        "Universal Render Pipeline/Lit",
+        "Universal Render Pipeline/Unlit",
+        "Standard",
+        "Sprites/Default",
+        "Hidden/InternalErrorShader"
+      );
 
       Material material = new Material(shader);
       material.color = color;
@@ -549,10 +551,14 @@ public class PongCircleGame : MonoBehaviour
     }
 
     Material CreateUnlitHdrMaterial(Color color, float intensity) {
-      Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-      if (shader == null) {
-        shader = Shader.Find("Unlit/Color");
-      }
+      Shader shader = FindFirstShader(
+        "Universal Render Pipeline/Unlit",
+        "Unlit/Color",
+        "Sprites/Default",
+        "Universal Render Pipeline/Lit",
+        "Standard",
+        "Hidden/InternalErrorShader"
+      );
 
       Material material = new Material(shader);
       Color hdr = color.linear * intensity;
@@ -561,6 +567,18 @@ public class PongCircleGame : MonoBehaviour
       }
       material.color = hdr;
       return material;
+    }
+
+    Shader FindFirstShader(params string[] shaderNames) {
+      foreach (string shaderName in shaderNames) {
+        Shader shader = Shader.Find(shaderName);
+        if (shader != null) {
+          return shader;
+        }
+      }
+
+      Debug.LogWarning("No supported runtime shader found for Pong materials.");
+      return Shader.Find("Hidden/InternalErrorShader");
     }
 
     static readonly Color NeonAccent = new Color(0.345f, 0.902f, 0.784f, 1f);
@@ -586,7 +604,7 @@ public class PongCircleGame : MonoBehaviour
       line.positionCount = segments;
       for (int i = 0; i < segments; i++) {
         float angle = 360f * i / segments;
-        Vector3 p = AngleToDirection(angle) * ArenaRadius;
+        Vector3 p = PongCircleGeometry.AngleToDirection(angle) * ArenaRadius;
         p.z = 0.05f; 
         line.SetPosition(i, p);
       }
@@ -631,7 +649,7 @@ public class PongCircleGame : MonoBehaviour
         if (MouseControlEnabled && i == LocalPlayerIndex && TryReadMouseAngle(out float mouseAngle)) {
           player.PaddleAngle = ClampPaddleAngle(mouseAngle, player.SectorStartAngle, player.SectorEndAngle);
         } else {
-          float direction = ReadLocalDirection(i);
+          float direction = PongDirectionalInput.ReadCirclePlayerDirection(i);
           player.PaddleAngle += direction * PaddleAngularSpeed * Time.deltaTime;
           player.PaddleAngle = ClampPaddleAngle(player.PaddleAngle, player.SectorStartAngle, player.SectorEndAngle);
         }
@@ -648,7 +666,7 @@ public class PongCircleGame : MonoBehaviour
           continue;
         }
 
-        Vector3 radial = AngleToDirection(player.PaddleAngle);
+        Vector3 radial = PongCircleGeometry.AngleToDirection(player.PaddleAngle);
         Vector3 tangent = new Vector3(-radial.y, radial.x, 0);
         Transform paddle = player.PaddleObject.transform;
         paddle.position = radial * (ArenaRadius - PaddleWidth * 0.5f);
@@ -683,7 +701,7 @@ public class PongCircleGame : MonoBehaviour
       // 2) On mesure l'écart angulaire entre le point d'impact et le centre de la raquette.
       //    Si cet écart est dans la demi-largeur de la raquette → rebond ; sinon le joueur
       //    a raté et est éliminé.
-      float angle = DirectionToAngle(ballPosition);
+      float angle = PongCircleGeometry.DirectionToAngle(ballPosition);
       CirclePlayer defender = FindPlayerAtAngle(angle);
       if (defender == null || !defender.IsAlive) {
         ResetBall();
@@ -707,19 +725,14 @@ public class PongCircleGame : MonoBehaviour
     // - Garde-fou : si la balle ne repart pas assez vers l'intérieur, on la ré-incline
     //   vers le centre pour éviter qu'elle longe le bord.
     void BounceOnPaddle(CirclePlayer defender, float impactAngle) {
-      Vector3 impactDirection = AngleToDirection(impactAngle);
-      Vector3 paddleDirection = AngleToDirection(defender.PaddleAngle);
-      Vector3 reflectedDirection = Vector3.Reflect(ballDirection, paddleDirection).normalized;
-
-      float offset = Mathf.DeltaAngle(defender.PaddleAngle, impactAngle) / Mathf.Max(1, PaddleArcDegrees * 0.5f);
-      Vector3 tangent = new Vector3(-paddleDirection.y, paddleDirection.x, 0);
-      Vector3 aimedDirection = (reflectedDirection + tangent * offset * PaddleAimInfluence).normalized;
-
-      if (Vector3.Dot(aimedDirection, -impactDirection) < 0.15f) {
-        aimedDirection = Vector3.Slerp(aimedDirection, -impactDirection, 0.5f).normalized;
-      }
-
-      ballDirection = aimedDirection;
+      Vector3 impactDirection = PongCircleGeometry.AngleToDirection(impactAngle);
+      ballDirection = PongCircleGeometry.BounceDirection(
+        ballDirection,
+        defender.PaddleAngle,
+        impactAngle,
+        PaddleArcDegrees,
+        PaddleAimInfluence
+      );
       Ball.transform.position = impactDirection * (ArenaRadius - 0.12f);
     }
 
@@ -754,21 +767,12 @@ public class PongCircleGame : MonoBehaviour
 
     CirclePlayer FindPlayerAtAngle(float angle) {
       foreach (CirclePlayer player in players) {
-        if (AngleInsideSector(angle, player.SectorStartAngle, player.SectorEndAngle)) {
+        if (PongCircleGeometry.AngleInsideSector(angle, player.SectorStartAngle, player.SectorEndAngle)) {
           return player;
         }
       }
 
       return null;
-    }
-
-    // Teste si un angle tombe dans un secteur [start, end], en restant robuste au
-    // passage par 0°/360° : on compare l'écart à la moitié de la largeur du secteur,
-    // toujours via Mathf.DeltaAngle (qui gère le wraparound), jamais par simple <=.
-    bool AngleInsideSector(float angle, float startAngle, float endAngle) {
-      float center = Mathf.LerpAngle(startAngle, endAngle, 0.5f);
-      float halfSize = Mathf.Abs(Mathf.DeltaAngle(startAngle, endAngle)) * 0.5f;
-      return Mathf.Abs(Mathf.DeltaAngle(center, angle)) <= halfSize;
     }
 
     void ResetBall() {
@@ -779,62 +783,7 @@ public class PongCircleGame : MonoBehaviour
       Ball.SetActive(true);
       Ball.transform.position = ballStartPosition;
       float angle = Random.Range(0f, 360f);
-      ballDirection = AngleToDirection(angle).normalized;
-    }
-
-    float ReadLocalDirection(int playerIndex) {
-      Keyboard keyboard = Keyboard.current;
-      if (keyboard == null) {
-        return 0;
-      }
-
-      switch (playerIndex % 8) {
-        case 0:
-          return ReadPair(keyboard.zKey, keyboard.wKey, keyboard.sKey);
-        case 1:
-          return ReadPair(keyboard.upArrowKey, null, keyboard.downArrowKey);
-        case 2:
-          return ReadPair(keyboard.tKey, null, keyboard.gKey);
-        case 3:
-          return ReadPair(keyboard.iKey, null, keyboard.kKey);
-        case 4:
-          return ReadPair(keyboard.fKey, null, keyboard.vKey);
-        case 5:
-          return ReadPair(keyboard.oKey, null, keyboard.lKey);
-        case 6:
-          return ReadPair(keyboard.aKey, null, keyboard.qKey);
-        case 7:
-          return ReadPair(keyboard.numpad8Key, null, keyboard.numpad5Key);
-      }
-
-      return 0;
-    }
-
-    float ReadPair(KeyControl positive, KeyControl alternativePositive, KeyControl negative) {
-      float direction = 0;
-      if ((positive != null && positive.isPressed) || (alternativePositive != null && alternativePositive.isPressed)) {
-        direction += 1;
-      }
-
-      if (negative != null && negative.isPressed) {
-        direction -= 1;
-      }
-
-      return Mathf.Clamp(direction, -1, 1);
-    }
-
-    Vector3 AngleToDirection(float angle) {
-      float radians = angle * Mathf.Deg2Rad;
-      return new Vector3(Mathf.Cos(radians), Mathf.Sin(radians), 0);
-    }
-
-    float DirectionToAngle(Vector3 direction) {
-      float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
-      if (angle < 0) {
-        angle += 360f;
-      }
-
-      return angle;
+      ballDirection = PongCircleGeometry.AngleToDirection(angle).normalized;
     }
 
     // Borne l'angle de la raquette pour qu'elle reste ENTIÈREMENT dans son secteur.
@@ -842,12 +791,7 @@ public class PongCircleGame : MonoBehaviour
     // secteur : le centre de la raquette ne peut donc pas s'approcher du bord à moins
     // d'une demi-raquette, sinon elle déborderait sur le secteur voisin.
     float ClampPaddleAngle(float angle, float startAngle, float endAngle) {
-      float center = Mathf.LerpAngle(startAngle, endAngle, 0.5f);
-      float sectorHalfSize = Mathf.Abs(Mathf.DeltaAngle(startAngle, endAngle)) * 0.5f;
-      float paddleHalfSize = PaddleArcDegrees * 0.5f;
-      float allowedHalfSize = Mathf.Max(0, sectorHalfSize - paddleHalfSize);
-      float delta = Mathf.Clamp(Mathf.DeltaAngle(center, angle), -allowedHalfSize, allowedHalfSize);
-      return center + delta;
+      return PongCircleGeometry.ClampPaddleAngle(angle, startAngle, endAngle, PaddleArcDegrees);
     }
 
     int CountAlivePlayers() {
@@ -1130,7 +1074,7 @@ public class PongCircleGame : MonoBehaviour
         return false;
       }
 
-      angle = DirectionToAngle(world);
+      angle = PongCircleGeometry.DirectionToAngle(world);
       return true;
     }
 

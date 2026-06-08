@@ -7,7 +7,6 @@ using System.Text;
 using System.Threading;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.InputSystem.Controls;
 
 public class PongCircleUdpClient : MonoBehaviour
 {
@@ -57,6 +56,18 @@ public class PongCircleUdpClient : MonoBehaviour
       get { return postGameRemainingSeconds; }
     }
 
+    public int PendingJoinCount {
+      get { return pendingJoinCount; }
+    }
+
+    public int PendingJoinRemainingSeconds {
+      get { return pendingJoinRemainingSeconds; }
+    }
+
+    public bool LocalPendingJoin {
+      get { return localPendingJoin; }
+    }
+
     UdpClient udp;
     IPEndPoint serverEndPoint;
     Thread receiveThread;
@@ -74,7 +85,10 @@ public class PongCircleUdpClient : MonoBehaviour
     int readyPlayerCount;
     int replayVoteCount;
     int postGameRemainingSeconds;
+    int pendingJoinCount;
+    int pendingJoinRemainingSeconds;
     int sequence;
+    bool snapshotGameStarted;
     PongCircleNetworkDeviceState[] devices = new PongCircleNetworkDeviceState[0];
     PongCircleNetworkDeviceState[] lobbyDevices = new PongCircleNetworkDeviceState[0];
     string deviceId;
@@ -82,6 +96,7 @@ public class PongCircleUdpClient : MonoBehaviour
     string chosenDisplayName = "";
     string chosenColorHex = "";
     string lastStatus = "UDP offline";
+    bool localPendingJoin;
     float nextHelloTime;
     float nextInputSendTime;
     float nextJoinRetryTime;
@@ -122,7 +137,7 @@ public class PongCircleUdpClient : MonoBehaviour
         return;
       }
 
-      float direction = ReadLocalDirection();
+      float direction = PongDirectionalInput.ReadUdpClientDirection(onScreenDirection, onScreenDirectionTime);
 
       EnsureCircleGame();
       if (CircleGame != null) {
@@ -290,15 +305,25 @@ public class PongCircleUdpClient : MonoBehaviour
       readyPlayerCount = snapshot.readyPlayerCount;
       replayVoteCount = snapshot.replayVoteCount;
       postGameRemainingSeconds = snapshot.postGameRemainingSeconds;
+      pendingJoinCount = snapshot.pendingJoinCount;
+      pendingJoinRemainingSeconds = snapshot.pendingJoinRemainingSeconds;
+      localPendingJoin = snapshot.localPendingJoin;
+      snapshotGameStarted = snapshot.gameStarted;
       if (snapshot.devices != null) {
         devices = snapshot.devices;
       }
       if (snapshot.lobbyDevices != null) {
         lobbyDevices = snapshot.lobbyDevices;
       }
-      lastStatus = localPlayerId > 0 ? "UDP player " + localPlayerId : "UDP lobby";
-
       if (localPlayerId > 0) {
+        lastStatus = "UDP player " + localPlayerId;
+      } else if (localPendingJoin) {
+        lastStatus = "UDP joining in " + pendingJoinRemainingSeconds + "s";
+      } else {
+        lastStatus = "UDP lobby";
+      }
+
+      if (snapshotGameStarted) {
         joinRetryEndTime = 0;
       }
 
@@ -309,7 +334,7 @@ public class PongCircleUdpClient : MonoBehaviour
     }
 
     void RetryJoinIfNeeded() {
-      if (joinRetryEndTime <= 0 || localPlayerId > 0) {
+      if (joinRetryEndTime <= 0 || snapshotGameStarted) {
         return;
       }
 
@@ -378,37 +403,6 @@ public class PongCircleUdpClient : MonoBehaviour
       if (int.TryParse(port, out int parsedPort)) {
         ServerPort = parsedPort;
       }
-    }
-
-    float ReadLocalDirection() {
-      if (Time.unscaledTime - onScreenDirectionTime < 0.2f) {
-        return onScreenDirection;
-      }
-
-      Keyboard keyboard = Keyboard.current;
-      if (keyboard == null) {
-        return 0;
-      }
-
-      float arrowDirection = ReadPair(keyboard.upArrowKey, null, keyboard.downArrowKey);
-      if (Mathf.Abs(arrowDirection) > 0) {
-        return arrowDirection;
-      }
-
-      return ReadPair(keyboard.zKey, keyboard.wKey, keyboard.sKey);
-    }
-
-    float ReadPair(KeyControl positive, KeyControl alternativePositive, KeyControl negative) {
-      float direction = 0;
-      if ((positive != null && positive.isPressed) || (alternativePositive != null && alternativePositive.isPressed)) {
-        direction += 1;
-      }
-
-      if (negative != null && negative.isPressed) {
-        direction -= 1;
-      }
-
-      return Mathf.Clamp(direction, -1, 1);
     }
 
     string LoadOrCreateDeviceId() {

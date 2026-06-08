@@ -1,9 +1,10 @@
 const dgram = require("dgram");
 const http = require("http");
+const geometry = require("./circle-geometry");
 
 const UDP_PORT = Number(process.env.UDP_PORT || 41234);
 const HEALTH_PORT = Number(process.env.UDP_HEALTH_PORT || 8082);
-const SERVER_VERSION = "udp-authoritative-2026-06-03-01";
+const SERVER_VERSION = "udp-authoritative-2026-06-08-autostart-01";
 
 const arenaRadius = 5;
 const paddleArcDegrees = 22;
@@ -13,6 +14,7 @@ const paddleAimInfluence = 0.45;
 const minimumPlayers = 2;
 const maximumPlayers = 10;
 const clientTimeoutMs = 10000;
+const runningJoinDelayMs = 3000;
 
 const socket = dgram.createSocket("udp4");
 const clientsByDevice = new Map();
@@ -74,7 +76,7 @@ socket.on("message", (buffer, remote) => {
   }
 
   if (payload.type === "input") {
-    client.input = clamp(Number(payload.direction) || 0, -1, 1);
+    client.input = geometry.clamp(Number(payload.direction) || 0, -1, 1);
     client.lastSeen = Date.now();
     return;
   }
@@ -122,10 +124,23 @@ http.createServer((req, res) => {
     connectedPlayerCount: game.connectedPlayerCount,
     readyPlayerCount: game.readyPlayerCount,
     playerCount: game.playerCount,
+    minimumPlayers,
+    maximumPlayers,
     lobbyOpen: game.lobbyOpen,
     gameStarted: game.gameStarted,
     gameOver: game.gameOver,
     winnerId: game.winnerId,
+    pendingJoinCount: countPendingJoinDevices(),
+    pendingJoinRemainingSeconds: getPendingJoinRemainingSeconds(),
+    connectedClients: getConnectedClients().length,
+    readyClients: getReadyClients().map((client) => ({
+      id: client.id,
+      playerId: client.playerId,
+      ready: client.ready,
+      pendingJoin: client.pendingJoin,
+      name: clientLabel(client),
+      ageMs: Date.now() - client.lastSeen
+    })),
     status: game.status,
     devices: buildDeviceList(),
     lobbyDevices: buildLobbyDeviceList()
@@ -148,8 +163,10 @@ function registerClient(deviceId, deviceName, remote) {
       playerId: 0,
       ready: false,
       input: 0,
-      wantsReplay: false,
-      lastSeen: Date.now()
+    wantsReplay: false,
+    pendingJoin: false,
+    pendingJoinDeadline: 0,
+    lastSeen: Date.now()
     };
     clientsByDevice.set(deviceId, client);
   }
@@ -209,7 +226,7 @@ function joinGame(client) {
   client.ready = true;
 
   if (game.gameStarted && !game.gameOver) {
-    addReadyPlayerToRunningGame(client);
+    queueRunningJoin(client);
     return;
   }
 
@@ -220,13 +237,29 @@ function joinGame(client) {
   game.postGameDeadline = 0;
   game.winnerId = 0;
   assignLobbyPlayers();
+  ensureMatchStartedIfReady();
 }
 
-function addReadyPlayerToRunningGame() {
-  const activeClients = getReadyClients();
+function queueRunningJoin(client) {
+  if (client.playerId > 0) {
+    return;
+  }
+
+  client.pendingJoin = true;
+  if (client.pendingJoinDeadline <= 0) {
+    client.pendingJoinDeadline = Date.now() + runningJoinDelayMs;
+  }
+
+  updateStatus();
+}
+
+function addPendingPlayersToRunningGame() {
+  const activeClients = getInGameAndEligiblePendingClients();
   const previousPlayerCount = game.players.length;
   activeClients.forEach((readyClient, index) => {
     readyClient.playerId = index + 1;
+    readyClient.pendingJoin = false;
+    readyClient.pendingJoinDeadline = 0;
   });
 
   rebuildPlayersForReadyClients(activeClients, true);
@@ -238,13 +271,17 @@ function addReadyPlayerToRunningGame() {
   }
 
   redistributeAlivePlayers();
+  resetBall();
   updateStatus();
+  broadcastSnapshot();
 }
 
 function resetToLobby(requestingClient) {
   for (const client of clientsByDevice.values()) {
     client.ready = false;
     client.input = 0;
+    client.pendingJoin = false;
+    client.pendingJoinDeadline = 0;
   }
 
   if (requestingClient) {
@@ -265,6 +302,8 @@ function returnToLobby() {
     client.ready = false;
     client.input = 0;
     client.wantsReplay = false;
+    client.pendingJoin = false;
+    client.pendingJoinDeadline = 0;
     client.playerId = 0;
   }
 
@@ -283,6 +322,8 @@ function assignLobbyPlayers() {
   for (const client of clientsByDevice.values()) {
     client.playerId = 0;
     client.input = 0;
+    client.pendingJoin = false;
+    client.pendingJoinDeadline = 0;
   }
 
   game.connectedPlayerCount = 0;
@@ -305,6 +346,28 @@ function assignLobbyPlayers() {
   }
 }
 
+function ensureMatchStartedIfReady() {
+  if (game.gameStarted || game.gameOver) {
+    return;
+  }
+
+  const readyClients = getReadyClients();
+  if (readyClients.length < minimumPlayers) {
+    return;
+  }
+
+  game.lobbyOpen = true;
+  game.playerCount = Math.max(minimumPlayers, Math.min(maximumPlayers, readyClients.length));
+  readyClients.forEach((client, index) => {
+    client.ready = true;
+    client.playerId = index + 1;
+    client.pendingJoin = false;
+    client.pendingJoinDeadline = 0;
+  });
+  rebuildPlayersForReadyClients(readyClients, false);
+  beginMatch();
+}
+
 function beginMatch() {
   game.lobbyOpen = true;
   game.gameStarted = true;
@@ -321,6 +384,8 @@ function beginMatch() {
 
   for (const client of clientsByDevice.values()) {
     client.wantsReplay = false;
+    client.pendingJoin = false;
+    client.pendingJoinDeadline = 0;
   }
 
   redistributeAlivePlayers();
@@ -336,6 +401,16 @@ function getConnectedClients() {
 
 function getReadyClients() {
   return getConnectedClients().filter((client) => client.ready).slice(0, maximumPlayers);
+}
+
+function getInGameAndEligiblePendingClients() {
+  const now = Date.now();
+  return getConnectedClients()
+    .filter((client) => client.ready && (
+      client.playerId > 0
+      || (client.pendingJoin && client.pendingJoinDeadline > 0 && client.pendingJoinDeadline <= now)
+    ))
+    .slice(0, maximumPlayers);
 }
 
 function rebuildPlayersForReadyClients(readyClients, preserveExistingPlayers) {
@@ -386,6 +461,7 @@ function tick() {
 
   cleanupClients();
   reconcileGameState();
+  updatePendingJoins();
   updateInputs();
   updatePostGameTimeout();
   updatePaddles(deltaTime);
@@ -401,6 +477,22 @@ function cleanupClients() {
   }
 }
 
+function updatePendingJoins() {
+  if (!game.gameStarted || game.gameOver) {
+    return;
+  }
+
+  if (countPendingJoinDevices() <= 0) {
+    return;
+  }
+
+  if (hasEligiblePendingJoin()) {
+    addPendingPlayersToRunningGame();
+  } else {
+    updateStatus();
+  }
+}
+
 function reconcileGameState() {
   if (game.gameOver) {
     return;
@@ -410,17 +502,23 @@ function reconcileGameState() {
   if (!game.gameStarted && readyClients.length >= minimumPlayers) {
     game.lobbyOpen = true;
     assignLobbyPlayers();
+    ensureMatchStartedIfReady();
     return;
   }
 
   if (game.gameStarted) {
-    if (readyClients.length < minimumPlayers) {
+    const activeClients = readyClients.filter((client) => client.playerId > 0);
+    if (activeClients.length < minimumPlayers && countPendingJoinDevices() <= 0) {
       returnToLobby();
       return;
     }
+    if (activeClients.length < minimumPlayers) {
+      updateStatus();
+      return;
+    }
 
-    let changed = readyClients.length !== game.players.length;
-    readyClients.forEach((client, index) => {
+    let changed = activeClients.length !== game.players.length;
+    activeClients.forEach((client, index) => {
       const expectedPlayerId = index + 1;
       if (client.playerId !== expectedPlayerId) {
         client.playerId = expectedPlayerId;
@@ -429,7 +527,7 @@ function reconcileGameState() {
     });
 
     if (changed) {
-      rebuildPlayersForReadyClients(readyClients, true);
+      rebuildPlayersForReadyClients(activeClients, true);
       redistributeAlivePlayers();
     }
   }
@@ -479,7 +577,7 @@ function updatePaddles(deltaTime) {
     }
 
     player.paddleAngle += player.input * paddleAngularSpeed * deltaTime;
-    player.paddleAngle = clampPaddleAngle(player.paddleAngle, player.sectorStartAngle, player.sectorEndAngle);
+    player.paddleAngle = geometry.clampPaddleAngle(player.paddleAngle, player.sectorStartAngle, player.sectorEndAngle, paddleArcDegrees);
   }
 }
 
@@ -496,14 +594,14 @@ function updateBall(deltaTime) {
     return;
   }
 
-  const angle = directionToAngle(game.ballX, game.ballY);
+  const angle = geometry.directionToAngle(game.ballX, game.ballY);
   const defender = findPlayerAtAngle(angle);
   if (!defender || !defender.alive) {
     resetBall();
     return;
   }
 
-  const paddleDelta = Math.abs(deltaAngle(angle, defender.paddleAngle));
+  const paddleDelta = Math.abs(geometry.deltaAngle(angle, defender.paddleAngle));
   if (paddleDelta <= paddleArcDegrees * 0.5) {
     bounceOnPaddle(defender, angle);
   } else {
@@ -520,6 +618,12 @@ function updateStatus() {
   }
 
   if (game.gameStarted) {
+    const pendingCount = countPendingJoinDevices();
+    if (pendingCount > 0) {
+      game.status = `Playing ${game.connectedPlayerCount}/${maximumPlayers} players, ${pendingCount} joining in ${getPendingJoinRemainingSeconds()}s`;
+      return;
+    }
+
     game.status = `Playing ${game.connectedPlayerCount}/${maximumPlayers} players`;
     return;
   }
@@ -546,6 +650,33 @@ function countReadyDevices() {
   return Math.min(getConnectedClients().filter((client) => client.ready).length, maximumPlayers);
 }
 
+function countPendingJoinDevices() {
+  return Math.min(getConnectedClients().filter((client) => client.ready && client.pendingJoin && client.playerId <= 0).length, maximumPlayers);
+}
+
+function getPendingJoinRemainingSeconds() {
+  const deadlines = getConnectedClients()
+    .filter((client) => client.ready && client.pendingJoin && client.playerId <= 0 && client.pendingJoinDeadline > 0)
+    .map((client) => client.pendingJoinDeadline);
+
+  if (deadlines.length === 0) {
+    return 0;
+  }
+
+  return Math.max(0, Math.ceil((Math.min(...deadlines) - Date.now()) / 1000));
+}
+
+function hasEligiblePendingJoin() {
+  const now = Date.now();
+  return getConnectedClients().some((client) =>
+    client.ready
+    && client.pendingJoin
+    && client.playerId <= 0
+    && client.pendingJoinDeadline > 0
+    && client.pendingJoinDeadline <= now
+  );
+}
+
 function countReplayVotes() {
   let count = 0;
   for (const client of clientsByDevice.values()) {
@@ -557,31 +688,18 @@ function countReplayVotes() {
 }
 
 function bounceOnPaddle(defender, impactAngle) {
-  const impactDirection = angleToDirection(impactAngle);
-  const paddleDirection = angleToDirection(defender.paddleAngle);
-  const dot = game.ballDirX * paddleDirection.x + game.ballDirY * paddleDirection.y;
-  let reflectedX = game.ballDirX - 2 * dot * paddleDirection.x;
-  let reflectedY = game.ballDirY - 2 * dot * paddleDirection.y;
+  const impactDirection = geometry.angleToDirection(impactAngle);
+  const direction = geometry.bounceDirection(
+    game.ballDirX,
+    game.ballDirY,
+    defender.paddleAngle,
+    impactAngle,
+    paddleArcDegrees,
+    paddleAimInfluence
+  );
 
-  const offset = deltaAngle(defender.paddleAngle, impactAngle) / Math.max(1, paddleArcDegrees * 0.5);
-  const tangent = { x: -paddleDirection.y, y: paddleDirection.x };
-  let aimedX = reflectedX + tangent.x * offset * paddleAimInfluence;
-  let aimedY = reflectedY + tangent.y * offset * paddleAimInfluence;
-  let length = Math.hypot(aimedX, aimedY) || 1;
-  aimedX /= length;
-  aimedY /= length;
-
-  const antiImpactDot = aimedX * -impactDirection.x + aimedY * -impactDirection.y;
-  if (antiImpactDot < 0.15) {
-    aimedX = lerp(aimedX, -impactDirection.x, 0.5);
-    aimedY = lerp(aimedY, -impactDirection.y, 0.5);
-    length = Math.hypot(aimedX, aimedY) || 1;
-    aimedX /= length;
-    aimedY /= length;
-  }
-
-  game.ballDirX = aimedX;
-  game.ballDirY = aimedY;
+  game.ballDirX = direction.x;
+  game.ballDirY = direction.y;
   game.ballX = impactDirection.x * (arenaRadius - 0.12);
   game.ballY = impactDirection.y * (arenaRadius - 0.12);
 }
@@ -598,6 +716,8 @@ function eliminatePlayer(player) {
     game.postGameDeadline = Date.now() + 30000;
     for (const client of clientsByDevice.values()) {
       client.wantsReplay = false;
+      client.pendingJoin = false;
+      client.pendingJoinDeadline = 0;
     }
     updatePostGameStatus();
     return;
@@ -635,26 +755,20 @@ function redistributeAlivePlayers() {
       player.paddleAngle = sectorCenter;
       player.hasPaddleAngle = true;
     } else {
-      player.paddleAngle = clampPaddleAngle(player.paddleAngle, player.sectorStartAngle, player.sectorEndAngle);
+      player.paddleAngle = geometry.clampPaddleAngle(player.paddleAngle, player.sectorStartAngle, player.sectorEndAngle, paddleArcDegrees);
     }
   });
 }
 
 function findPlayerAtAngle(angle) {
-  return game.players.find((player) => angleInsideSector(angle, player.sectorStartAngle, player.sectorEndAngle));
-}
-
-function angleInsideSector(angle, startAngle, endAngle) {
-  const center = lerpAngle(startAngle, endAngle, 0.5);
-  const halfSize = Math.abs(deltaAngle(startAngle, endAngle)) * 0.5;
-  return Math.abs(deltaAngle(center, angle)) <= halfSize;
+  return game.players.find((player) => geometry.angleInsideSector(angle, player.sectorStartAngle, player.sectorEndAngle));
 }
 
 function resetBall() {
   game.ballX = 0;
   game.ballY = 0;
   const angle = Math.random() * 360;
-  const direction = angleToDirection(angle);
+  const direction = geometry.angleToDirection(angle);
   game.ballDirX = direction.x;
   game.ballDirY = direction.y;
 }
@@ -674,6 +788,9 @@ function buildSnapshot(client, full = true) {
     gameStarted: game.gameStarted,
     gameOver: game.gameOver,
     replayVoteCount: game.replayVoteCount,
+    pendingJoinCount: countPendingJoinDevices(),
+    pendingJoinRemainingSeconds: getPendingJoinRemainingSecondsForClient(client),
+    localPendingJoin: client ? client.ready && client.pendingJoin && client.playerId <= 0 : false,
     postGameRemainingSeconds: game.gameOver && game.postGameDeadline > 0
       ? Math.max(0, Math.ceil((game.postGameDeadline - Date.now()) / 1000))
       : 0,
@@ -716,7 +833,16 @@ function metaSignature() {
     })
     .join("|");
   return devs + "#" + lobby + "#" + identities + "#" + game.status
-    + "#" + game.lobbyOpen + game.gameStarted + game.gameOver + game.winnerId;
+    + "#" + game.lobbyOpen + game.gameStarted + game.gameOver + game.winnerId
+    + "#" + countPendingJoinDevices() + ":" + getPendingJoinRemainingSeconds();
+}
+
+function getPendingJoinRemainingSecondsForClient(client) {
+  if (client && client.ready && client.pendingJoin && client.playerId <= 0 && client.pendingJoinDeadline > 0) {
+    return Math.max(0, Math.ceil((client.pendingJoinDeadline - Date.now()) / 1000));
+  }
+
+  return getPendingJoinRemainingSeconds();
 }
 
 function clientForPlayerId(playerId) {
@@ -772,48 +898,6 @@ function broadcastSnapshot() {
 function sendSnapshot(client, full = true) {
   const message = Buffer.from(JSON.stringify(buildSnapshot(client, full)));
   socket.send(message, client.port, client.address);
-}
-
-function angleToDirection(angle) {
-  const radians = angle * Math.PI / 180;
-  return { x: Math.cos(radians), y: Math.sin(radians) };
-}
-
-function directionToAngle(x, y) {
-  const angle = Math.atan2(y, x) * 180 / Math.PI;
-  return angle < 0 ? angle + 360 : angle;
-}
-
-function clampPaddleAngle(angle, startAngle, endAngle) {
-  const center = lerpAngle(startAngle, endAngle, 0.5);
-  const sectorHalfSize = Math.abs(deltaAngle(startAngle, endAngle)) * 0.5;
-  const allowedHalfSize = Math.max(0, sectorHalfSize - paddleArcDegrees * 0.5);
-  const delta = clamp(deltaAngle(center, angle), -allowedHalfSize, allowedHalfSize);
-  return center + delta;
-}
-
-function lerpAngle(a, b, t) {
-  return a + deltaAngle(a, b) * t;
-}
-
-function deltaAngle(current, target) {
-  let delta = repeat((target - current), 360);
-  if (delta > 180) {
-    delta -= 360;
-  }
-  return delta;
-}
-
-function repeat(value, length) {
-  return clamp(value - Math.floor(value / length) * length, 0, length);
-}
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
 }
 
 function round(value) {

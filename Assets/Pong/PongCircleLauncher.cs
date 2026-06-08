@@ -111,7 +111,8 @@ public class PongCircleLauncher : MonoBehaviour
     void DrawJoinMenu() {
       GUI.Box(new Rect(0, 0, Screen.width, Screen.height), "");
 
-      bool canJoin = CircleGame.WinnerId <= 0;
+      bool pendingJoin = IsLocalPendingJoin();
+      bool canJoin = CircleGame.WinnerId <= 0 && !pendingJoin;
       bool mobileLayout = Screen.width < 700 || Screen.height < 700 || ShouldShowNetworkMobileControls();
       float width = mobileLayout ? Mathf.Min(Screen.width - 24, 560) : Mathf.Min(420, Screen.width - 32);
       float height = mobileLayout ? Mathf.Min(Screen.height - 48, 640) : Mathf.Min(520, Screen.height - 32);
@@ -147,13 +148,17 @@ public class PongCircleLauncher : MonoBehaviour
       GUILayout.Label("Menu", subtitleStyle);
       GUILayout.Space(mobileLayout ? 24 : 16);
 
-      string actionLabel = CircleGame.IsGameStarted
+      string actionLabel = pendingJoin
+        ? "Joining in " + GetPendingJoinRemainingSeconds() + "s"
+        : CircleGame.IsGameStarted
         ? "Join Running Game"
         : "Join / Start Game";
 
+      GUI.enabled = !pendingJoin;
       if (GUILayout.Button(actionLabel, joinButtonStyle, GUILayout.Height(mobileLayout ? 78 : 52))) {
         SendNetworkStartGame();
       }
+      GUI.enabled = true;
 
       if (GetLocalPlayerId() > 0) {
         GUILayout.Label("Your player: " + GetLocalPlayerId(), subtitleStyle);
@@ -164,6 +169,8 @@ public class PongCircleLauncher : MonoBehaviour
       GUILayout.Label("Players in game: " + GetConnectedPlayerCount() + "/" + CircleGame.MaximumPlayers, subtitleStyle);
       if (!CircleGame.IsGameStarted) {
         GUILayout.Label("Minimum to start: " + CircleGame.MinimumPlayers, subtitleStyle);
+      } else if (GetPendingJoinCount() > 0) {
+        GUILayout.Label("Joining in: " + GetPendingJoinRemainingSeconds() + "s", subtitleStyle);
       }
 
       GUILayout.Space(16);
@@ -171,7 +178,9 @@ public class PongCircleLauncher : MonoBehaviour
       DrawLobbyDevices();
 
       GUILayout.FlexibleSpace();
-      if (GetLocalPlayerId() <= 0) {
+      if (pendingJoin) {
+        GUILayout.Label("Tu rejoins la partie dans " + GetPendingJoinRemainingSeconds() + "s.", subtitleStyle);
+      } else if (GetLocalPlayerId() <= 0) {
         GUILayout.Label("Tu es dans le menu tant que tu n'as pas rejoint la partie.", subtitleStyle);
       } else {
         GUILayout.Label("La partie se lance quand assez de joueurs ont rejoint.", subtitleStyle);
@@ -508,6 +517,30 @@ public class PongCircleLauncher : MonoBehaviour
       }
 
       return 0;
+    }
+
+    int GetPendingJoinCount() {
+      if (ShouldUseUdp()) {
+        return UdpClient.PendingJoinCount;
+      }
+
+      return 0;
+    }
+
+    int GetPendingJoinRemainingSeconds() {
+      if (ShouldUseUdp()) {
+        return UdpClient.PendingJoinRemainingSeconds;
+      }
+
+      return 0;
+    }
+
+    bool IsLocalPendingJoin() {
+      if (ShouldUseUdp()) {
+        return UdpClient.LocalPendingJoin;
+      }
+
+      return false;
     }
 
     bool IsLobbyOpen() {

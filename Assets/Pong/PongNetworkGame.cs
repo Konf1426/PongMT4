@@ -3,7 +3,6 @@ using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 public class PongNetworkGame : MonoBehaviour
 {
@@ -394,9 +393,9 @@ public class PongNetworkGame : MonoBehaviour
 
       foreach (PongLocalPlayer player in hostLocalPlayers) {
         if (player.Team == PongPlayer.PlayerLeft) {
-          leftInput += ReadLocalDirection(player.ControlIndex);
+          leftInput += PongDirectionalInput.ReadClassicHostDirection(player.ControlIndex);
         } else {
-          rightInput += ReadLocalDirection(player.ControlIndex);
+          rightInput += PongDirectionalInput.ReadClassicHostDirection(player.ControlIndex);
         }
       }
 
@@ -473,37 +472,7 @@ public class PongNetworkGame : MonoBehaviour
     }
 
     float ReadDefaultLocalDirection() {
-      return ReadLocalDirection(0);
-    }
-
-    float ReadLocalDirection(int controlIndex) {
-      Keyboard keyboard = Keyboard.current;
-      if (keyboard == null) {
-        return 0;
-      }
-
-      float direction = 0;
-
-      switch (controlIndex) {
-        case 0:
-          if (keyboard.zKey.isPressed || keyboard.wKey.isPressed) { direction += 1; }
-          if (keyboard.sKey.isPressed) { direction -= 1; }
-          break;
-        case 1:
-          if (keyboard.upArrowKey.isPressed) { direction += 1; }
-          if (keyboard.downArrowKey.isPressed) { direction -= 1; }
-          break;
-        case 2:
-          if (keyboard.tKey.isPressed) { direction += 1; }
-          if (keyboard.gKey.isPressed) { direction -= 1; }
-          break;
-        case 3:
-          if (keyboard.iKey.isPressed) { direction += 1; }
-          if (keyboard.kKey.isPressed) { direction -= 1; }
-          break;
-      }
-
-      return Mathf.Clamp(direction, -1, 1);
+      return PongDirectionalInput.ReadClassicHostDirection(0);
     }
 
     void SendJoin() {

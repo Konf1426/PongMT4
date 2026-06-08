@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 [ExecuteAlways]
@@ -8,6 +9,10 @@ public class PongCircleLauncher : MonoBehaviour
     public PongCircleGame CircleGame;
     public PongCircleUdpClient UdpClient;
     public bool EnableUdpSync = true;
+
+    // Mis à true par PongCircleHud (UI Toolkit) pour masquer cette UI IMGUI héritée.
+    // Reste false si le HUD UI Toolkit est absent (fallback).
+    public bool HideImguiUi = false;
 
     string playerCount = "4";
     float nextJoinTapTime;
@@ -59,6 +64,10 @@ public class PongCircleLauncher : MonoBehaviour
 
     void OnGUI() {
       if (!Application.isPlaying) {
+        return;
+      }
+
+      if (HideImguiUi) {
         return;
       }
 
@@ -196,10 +205,8 @@ public class PongCircleLauncher : MonoBehaviour
     }
 
     void DrawLobby() {
-      GUILayout.BeginArea(new Rect(16, 16, 300, Screen.height - 32), GUI.skin.box);
-      GUILayout.Label("Circle Pong");
-      GUILayout.Space(8);
-      GUILayout.Label("Lobby");
+      GUILayout.BeginArea(new Rect(16, 16, 360, Screen.height - 32), GUI.skin.box);
+      GUILayout.Label("Circle Pong — Lobby");
       GUILayout.Space(8);
 
       if (GUILayout.Button("Join / Start Game", GUILayout.Height(42))) {
@@ -212,26 +219,31 @@ public class PongCircleLauncher : MonoBehaviour
 
       GUILayout.Space(12);
 
+      // Nombre de joueurs (borné entre Min et Max par le moteur)
       GUILayout.BeginHorizontal();
-      GUILayout.Label("Players", GUILayout.Width(80));
-      playerCount = GUILayout.TextField(playerCount);
-      GUILayout.EndHorizontal();
-
-      if (GUILayout.Button("Apply Player Count")) {
+      GUILayout.Label("Players", GUILayout.Width(60));
+      playerCount = GUILayout.TextField(playerCount, GUILayout.Width(45));
+      if (GUILayout.Button("Apply")) {
         ApplyPlayerCount();
       }
 
-      GUILayout.BeginHorizontal();
-      if (GUILayout.Button("- Player")) {
+      GUI.enabled = CircleGame.CurrentPlayerCount > CircleGame.MinimumPlayers;
+      if (GUILayout.Button("-")) {
         CircleGame.RemovePlayer();
         playerCount = CircleGame.CurrentPlayerCount.ToString();
       }
 
-      if (GUILayout.Button("+ Player")) {
+      GUI.enabled = CircleGame.CurrentPlayerCount < CircleGame.MaximumPlayers;
+      if (GUILayout.Button("+")) {
         CircleGame.AddPlayer();
         playerCount = CircleGame.CurrentPlayerCount.ToString();
       }
+      GUI.enabled = true;
       GUILayout.EndHorizontal();
+      GUILayout.Label("Allowed: " + CircleGame.MinimumPlayers + " to " + CircleGame.MaximumPlayers);
+
+      GUILayout.Space(6);
+      CircleGame.MouseControlEnabled = GUILayout.Toggle(CircleGame.MouseControlEnabled, "Mouse controls Player 1");
 
       GUILayout.Space(8);
       GUILayout.Label("Current players: " + CircleGame.CurrentPlayerCount);
@@ -406,7 +418,7 @@ public class PongCircleLauncher : MonoBehaviour
       subtitleStyle.alignment = TextAnchor.MiddleCenter;
       subtitleStyle.fontSize = 18;
 
-      GUILayout.Label("Player " + CircleGame.WinnerId + " wins!", titleStyle);
+      GUILayout.Label(CircleGame.GetPlayerName(CircleGame.WinnerId) + " wins!", titleStyle);
       GUILayout.Space(12);
       GUILayout.Label("Last player alive", subtitleStyle);
       GUILayout.Space(16);

@@ -56,6 +56,12 @@ socket.on("message", (buffer, remote) => {
 
   const client = registerClient(deviceId, deviceName, remote);
 
+  const displayName = sanitizeDeviceName(envelope.displayName || payload.displayName || "");
+  if (displayName) {
+    client.displayName = displayName;
+  }
+  client.color = sanitizeColor(envelope.color || payload.color || "");
+
   if (payload.type === "hello") {
     sendSnapshot(client);
     return;
@@ -135,6 +141,8 @@ function registerClient(deviceId, deviceName, remote) {
       id: nextClientId++,
       deviceId,
       deviceName: deviceName || "Device",
+      displayName: "",
+      color: "",
       address: remote.address,
       port: remote.port,
       playerId: 0,
@@ -177,6 +185,16 @@ function sanitizeDeviceName(deviceName) {
     .replace(/[^\w .-]/g, "")
     .trim()
     .slice(0, 24);
+}
+
+function sanitizeColor(value) {
+  return String(value || "").replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
+}
+
+function clientLabel(client) {
+  return client.displayName && client.displayName.length > 0
+    ? client.displayName
+    : (client.deviceName || "Device");
 }
 
 function joinGame(client) {
@@ -641,9 +659,10 @@ function resetBall() {
   game.ballDirY = direction.y;
 }
 
-function buildSnapshot(client) {
+
+function buildSnapshot(client, full = true) {
   const alivePlayerCount = game.players.filter((player) => player.alive).length;
-  return {
+  const snapshot = {
     type: "state",
     localPlayerId: client ? client.playerId : 0,
     lobbyOpen: game.lobbyOpen,
@@ -658,19 +677,55 @@ function buildSnapshot(client) {
     postGameRemainingSeconds: game.gameOver && game.postGameDeadline > 0
       ? Math.max(0, Math.ceil((game.postGameDeadline - Date.now()) / 1000))
       : 0,
-    status: game.status,
     ballX: round(game.ballX),
     ballY: round(game.ballY),
     ballDirX: round(game.ballDirX),
     ballDirY: round(game.ballDirY),
-    devices: buildDeviceList(),
-    lobbyDevices: buildLobbyDeviceList(),
-    players: game.players.map((player) => ({
-      id: player.id,
-      alive: player.alive,
-      paddleAngle: round(player.paddleAngle)
-    }))
+    players: game.players.map((player) => {
+      const owner = clientForPlayerId(player.id);
+      return {
+        id: player.id,
+        alive: player.alive,
+        paddleAngle: round(player.paddleAngle),
+        name: full && owner ? clientLabel(owner) : "",
+        color: full && owner ? owner.color : ""
+      };
+    })
   };
+
+  if (full) {
+    snapshot.status = game.status;
+    snapshot.devices = buildDeviceList();
+    snapshot.lobbyDevices = buildLobbyDeviceList();
+  }
+
+  return snapshot;
+}
+
+function metaSignature() {
+  const devs = buildDeviceList()
+    .map((d) => d.playerId + ":" + d.name + ":" + d.ready + ":" + d.color)
+    .join("|");
+  const lobby = buildLobbyDeviceList()
+    .map((d) => d.name + ":" + d.color)
+    .join("|");
+  const identities = game.players
+    .map((p) => {
+      const owner = clientForPlayerId(p.id);
+      return p.id + ":" + (owner ? clientLabel(owner) : "") + ":" + (owner ? owner.color : "");
+    })
+    .join("|");
+  return devs + "#" + lobby + "#" + identities + "#" + game.status
+    + "#" + game.lobbyOpen + game.gameStarted + game.gameOver + game.winnerId;
+}
+
+function clientForPlayerId(playerId) {
+  for (const client of clientsByDevice.values()) {
+    if (client.playerId === playerId) {
+      return client;
+    }
+  }
+  return null;
 }
 
 function buildDeviceList() {
@@ -679,8 +734,9 @@ function buildDeviceList() {
     .sort((a, b) => a.playerId - b.playerId)
     .map((client) => ({
       playerId: client.playerId,
-      name: client.deviceName || "Device",
-      ready: client.ready
+      name: clientLabel(client),
+      ready: client.ready,
+      color: client.color
     }));
 }
 
@@ -690,19 +746,31 @@ function buildLobbyDeviceList() {
     .sort((a, b) => a.id - b.id)
     .map((client) => ({
       playerId: 0,
-      name: client.deviceName || "Device",
-      ready: false
+      name: clientLabel(client),
+      ready: false,
+      color: client.color
     }));
 }
 
+let lastMetaSignature = "";
+let lastFullBroadcastTime = 0;
+
 function broadcastSnapshot() {
+  const signature = metaSignature();
+  const now = Date.now();
+  const full = signature !== lastMetaSignature || (now - lastFullBroadcastTime) >= 1000;
+  if (full) {
+    lastMetaSignature = signature;
+    lastFullBroadcastTime = now;
+  }
+
   for (const client of clientsByDevice.values()) {
-    sendSnapshot(client);
+    sendSnapshot(client, full);
   }
 }
 
-function sendSnapshot(client) {
-  const message = Buffer.from(JSON.stringify(buildSnapshot(client)));
+function sendSnapshot(client, full = true) {
+  const message = Buffer.from(JSON.stringify(buildSnapshot(client, full)));
   socket.send(message, client.port, client.address);
 }
 

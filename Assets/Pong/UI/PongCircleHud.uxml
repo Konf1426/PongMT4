@@ -1,0 +1,72 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ui:UXML xmlns:ui="UnityEngine.UIElements" editor-extension-mode="False">
+    <Style src="project://database/Assets/Pong/UI/PongCircleHud.uss?fileID=7433441132597879392&amp;guid=b5ea94d4a4184076aea242e9beeae463&amp;type=3#PongCircleHud" />
+    <ui:VisualElement name="hud-root" class="hud-root" picking-mode="Ignore">
+
+        <!-- Menu réseau : rejoindre / lancer -->
+        <ui:VisualElement name="panel-join" class="card card--center">
+            <ui:Label text="Circle Pong" name="join-title" class="card-title" />
+            <ui:Label text="Menu" name="join-subtitle" class="card-subtitle" />
+            <ui:VisualElement name="join-identity" class="identity">
+                <ui:Label text="Ton nom" class="field-label" />
+                <ui:TextField name="join-name" class="name-field" />
+                <ui:Label text="Couleur de ta zone" class="field-label" />
+                <ui:VisualElement name="join-colors" class="color-row" />
+            </ui:VisualElement>
+            <ui:Button text="Jouer / Rejoindre" name="btn-join" class="primary-button" />
+            <ui:Label text="" name="join-yourplayer" class="info info--accent" />
+            <ui:Label text="" name="join-network" class="info" />
+            <ui:Label text="" name="join-players" class="info" />
+            <ui:Label text="" name="join-min" class="info" />
+            <ui:VisualElement name="join-devices" class="device-list" />
+            <ui:VisualElement name="join-lobby-devices" class="device-list" />
+            <ui:Label text="" name="join-hint" class="hint" />
+        </ui:VisualElement>
+
+        <!-- Lobby local (hors réseau) -->
+        <ui:VisualElement name="panel-lobby" class="card card--topleft">
+            <ui:Label text="Circle Pong — Lobby" class="card-title card-title--small" />
+            <ui:Button text="Démarrer" name="btn-lobby-start" class="primary-button" />
+            <ui:VisualElement class="row">
+                <ui:Label text="Joueurs" class="row-label" />
+                <ui:TextField name="lobby-count-field" class="count-field" />
+                <ui:Button text="OK" name="btn-lobby-apply" class="mini-button" />
+                <ui:Button text="-" name="btn-lobby-minus" class="mini-button" />
+                <ui:Button text="+" name="btn-lobby-plus" class="mini-button" />
+            </ui:VisualElement>
+            <ui:Label text="" name="lobby-allowed" class="info" />
+            <ui:Toggle label="Souris = Joueur 1" name="lobby-mouse" class="toggle" />
+            <ui:Label text="" name="lobby-status" class="info" />
+            <ui:Label text="" name="lobby-controls" class="hint" />
+        </ui:VisualElement>
+
+        <!-- HUD en jeu -->
+        <ui:VisualElement name="panel-hud" class="card card--topleft">
+            <ui:Label text="Circle Pong" class="card-title card-title--small" />
+            <ui:Label text="" name="hud-players" class="info" />
+            <ui:Label text="" name="hud-alive" class="info" />
+            <ui:Label text="" name="hud-status" class="info" />
+            <ui:Label text="" name="hud-network" class="info" />
+            <ui:Button text="Relancer le lobby" name="btn-restart" class="secondary-button" />
+            <ui:VisualElement name="hud-devices" class="device-list" />
+            <ui:VisualElement name="hud-lobby-devices" class="device-list" />
+        </ui:VisualElement>
+
+        <!-- Écran de victoire -->
+        <ui:VisualElement name="panel-win" class="card card--center">
+            <ui:Label text="" name="win-title" class="card-title" />
+            <ui:Label text="Dernier joueur en vie" name="win-subtitle" class="card-subtitle" />
+            <ui:Label text="" name="win-votes" class="info" />
+            <ui:Label text="" name="win-countdown" class="info" />
+            <ui:Button text="Rejouer" name="btn-replay" class="primary-button" />
+            <ui:Button text="Retour lobby" name="btn-return" class="secondary-button" />
+        </ui:VisualElement>
+
+        <!-- Contrôles tactiles -->
+        <ui:VisualElement name="mobile-controls" class="mobile-bar">
+            <ui:Button text="←" name="btn-left" class="mobile-btn" />
+            <ui:Button text="→" name="btn-right" class="mobile-btn" />
+        </ui:VisualElement>
+
+    </ui:VisualElement>
+</ui:UXML>

@@ -60,6 +60,9 @@ public class PongCircleUdpClient : MonoBehaviour
     UdpClient udp;
     IPEndPoint serverEndPoint;
     Thread receiveThread;
+    // File producteur/consommateur : le thread réseau y dépose les datagrammes reçus,
+    // le thread principal Unity les retire. Le verrou protège l'accès concurrent
+    // (l'API Unity n'étant pas thread-safe, on ne la touche que sur le thread principal).
     readonly Queue<string> receivedMessages = new Queue<string>();
     readonly object receivedMessagesLock = new object();
 
@@ -76,6 +79,8 @@ public class PongCircleUdpClient : MonoBehaviour
     PongCircleNetworkDeviceState[] lobbyDevices = new PongCircleNetworkDeviceState[0];
     string deviceId;
     string deviceName;
+    string chosenDisplayName = "";
+    string chosenColorHex = "";
     string lastStatus = "UDP offline";
     float nextHelloTime;
     float nextInputSendTime;
@@ -83,6 +88,8 @@ public class PongCircleUdpClient : MonoBehaviour
     float joinRetryEndTime;
     float onScreenDirection;
     float onScreenDirectionTime;
+    float lastSentDirection = 999f;
+    int redundantSendsLeft;
 
     void Awake() {
       EnsureCircleGame();
@@ -111,12 +118,29 @@ public class PongCircleUdpClient : MonoBehaviour
 
       RetryJoinIfNeeded();
 
-      if (localPlayerId <= 0 || Time.time < nextInputSendTime) {
+      if (localPlayerId <= 0) {
         return;
       }
 
-      nextInputSendTime = Time.time + (1 / Mathf.Max(1, InputSendRate));
-      SendInput(ReadLocalDirection());
+      float direction = ReadLocalDirection();
+
+      EnsureCircleGame();
+      if (CircleGame != null) {
+        CircleGame.SetLocalPredictedInput(direction);
+      }
+
+      float spacing = 1f / Mathf.Max(1f, InputSendRate);
+      bool changed = Mathf.Abs(direction - lastSentDirection) > 0.01f;
+      if (changed) {
+        SendInput(direction);
+        lastSentDirection = direction;
+        redundantSendsLeft = 2;
+        nextInputSendTime = Time.time + spacing;
+      } else if (redundantSendsLeft > 0 && Time.time >= nextInputSendTime) {
+        SendInput(direction);
+        redundantSendsLeft--;
+        nextInputSendTime = Time.time + spacing;
+      }
     }
 
     void OnDisable() {
@@ -192,6 +216,15 @@ public class PongCircleUdpClient : MonoBehaviour
       SendMessage("{\"type\":\"lobby\"}");
     }
 
+    // Identité choisie par l'utilisateur, propagée au serveur
+    public void SetIdentity(string name, string colorHex) {
+      chosenDisplayName = name ?? "";
+      chosenColorHex = (colorHex ?? "").Replace("#", "");
+      if (connected) {
+        SendHello();
+      }
+    }
+
     public void SetOnScreenDirection(float direction) {
       onScreenDirection = Mathf.Clamp(direction, -1, 1);
       onScreenDirectionTime = Time.unscaledTime;
@@ -201,6 +234,8 @@ public class PongCircleUdpClient : MonoBehaviour
       return Application.isMobilePlatform || Input.touchSupported || Touchscreen.current != null;
     }
 
+    // PRODUCTEUR (thread d'arrière-plan) : boucle bloquante sur udp.Receive().
+    // Chaque message est empilé dans la file partagée ; aucune logique de jeu ici.
     void ReceiveLoop() {
       IPEndPoint remote = new IPEndPoint(IPAddress.Any, 0);
       while (!stopping) {
@@ -219,6 +254,9 @@ public class PongCircleUdpClient : MonoBehaviour
       }
     }
 
+    // CONSOMMATEUR (thread principal, appelé chaque frame) : vide la file et
+    // traite les messages un par un. On ne garde le verrou que le temps du Dequeue
+    // pour ne pas bloquer le thread réseau pendant le traitement.
     void DrainMessages() {
       while (true) {
         string message = null;
@@ -252,8 +290,12 @@ public class PongCircleUdpClient : MonoBehaviour
       readyPlayerCount = snapshot.readyPlayerCount;
       replayVoteCount = snapshot.replayVoteCount;
       postGameRemainingSeconds = snapshot.postGameRemainingSeconds;
-      devices = snapshot.devices ?? new PongCircleNetworkDeviceState[0];
-      lobbyDevices = snapshot.lobbyDevices ?? new PongCircleNetworkDeviceState[0];
+      if (snapshot.devices != null) {
+        devices = snapshot.devices;
+      }
+      if (snapshot.lobbyDevices != null) {
+        lobbyDevices = snapshot.lobbyDevices;
+      }
       lastStatus = localPlayerId > 0 ? "UDP player " + localPlayerId : "UDP lobby";
 
       if (localPlayerId > 0) {
@@ -305,7 +347,7 @@ public class PongCircleUdpClient : MonoBehaviour
         return;
       }
 
-      string wrapped = "{\"seq\":" + (++sequence) + ",\"deviceId\":\"" + Escape(deviceId) + "\",\"deviceName\":\"" + Escape(deviceName) + "\",\"payload\":" + json + "}";
+      string wrapped = "{\"seq\":" + (++sequence) + ",\"deviceId\":\"" + Escape(deviceId) + "\",\"deviceName\":\"" + Escape(deviceName) + "\",\"displayName\":\"" + Escape(chosenDisplayName) + "\",\"color\":\"" + Escape(chosenColorHex) + "\",\"payload\":" + json + "}";
       byte[] data = Encoding.UTF8.GetBytes(wrapped);
       try {
         udp.Send(data, data.Length);

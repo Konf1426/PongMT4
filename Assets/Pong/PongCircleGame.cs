@@ -146,7 +146,7 @@ public class PongCircleGame : MonoBehaviour
         return;
       }
 
-      if (!gameStarted && !gameOver) {
+      if (!NetworkControlled && !gameStarted && !gameOver) {
         UpdateLobbyCountdown();
       }
 

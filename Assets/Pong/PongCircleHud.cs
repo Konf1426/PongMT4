@@ -161,6 +161,7 @@ public class PongCircleHud : MonoBehaviour
         RegisterHold(btnRight, 1);
 
         SyncCountField();
+        HideAll();
         bound = true;
     }
 

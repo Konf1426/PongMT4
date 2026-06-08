@@ -288,7 +288,7 @@ public class PongCircleGame : MonoBehaviour
         pongBall.AutoMove = false;
       }
 
-      PongPaddle[] paddles = GameObject.FindObjectsByType<PongPaddle>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+      PongPaddle[] paddles = GameObject.FindObjectsByType<PongPaddle>(FindObjectsInactive.Exclude);
       foreach (PongPaddle paddle in paddles) {
         paddle.UseLocalInput = false;
       }

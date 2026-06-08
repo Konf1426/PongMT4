@@ -155,7 +155,7 @@ public class PongNetworkGame : MonoBehaviour
       }
 
       if (PaddleLeft == null || PaddleRight == null) {
-        PongPaddle[] paddles = GameObject.FindObjectsByType<PongPaddle>(FindObjectsInactive.Exclude, FindObjectsSortMode.None);
+        PongPaddle[] paddles = GameObject.FindObjectsByType<PongPaddle>(FindObjectsInactive.Exclude);
         foreach (PongPaddle paddle in paddles) {
           if (paddle.Player == PongPlayer.PlayerLeft) {
             PaddleLeft = paddle;

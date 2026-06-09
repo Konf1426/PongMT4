@@ -1,13 +1,11 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.InputSystem.Controls;
 
 public class PongCircleUdpClient : MonoBehaviour
 {
@@ -210,15 +208,15 @@ public class PongCircleUdpClient : MonoBehaviour
     }
 
     public void SendRestartLobby() {
-      SendMessage("{\"type\":\"restart\"}");
+      SendMessage(PongCircleUdpProtocol.Simple("restart"));
     }
 
     public void SendReplayVote() {
-      SendMessage("{\"type\":\"replay\"}");
+      SendMessage(PongCircleUdpProtocol.Simple("replay"));
     }
 
     public void SendReturnLobby() {
-      SendMessage("{\"type\":\"lobby\"}");
+      SendMessage(PongCircleUdpProtocol.Simple("lobby"));
     }
 
     // Identité choisie par l'utilisateur, propagée au serveur
@@ -333,18 +331,18 @@ public class PongCircleUdpClient : MonoBehaviour
     }
 
     void SendHello() {
-      SendMessage("{\"type\":\"hello\",\"deviceId\":\"" + Escape(deviceId) + "\",\"deviceName\":\"" + Escape(deviceName) + "\"}");
+      SendMessage(PongCircleUdpProtocol.Hello(deviceId, deviceName));
     }
 
     void SendJoin() {
-      SendMessage("{\"type\":\"join\"}");
+      SendMessage(PongCircleUdpProtocol.Simple("join"));
     }
 
     void SendInput(float direction) {
-      SendMessage("{\"type\":\"input\",\"direction\":" + direction.ToString("0.###", CultureInfo.InvariantCulture) + "}");
+      SendMessage(PongCircleUdpProtocol.Input(direction));
     }
 
-    void SendMessage(string json) {
+    void SendMessage(PongCircleUdpPayload payload) {
       if (udp == null) {
         Connect();
       }
@@ -353,7 +351,13 @@ public class PongCircleUdpClient : MonoBehaviour
         return;
       }
 
-      string wrapped = "{\"seq\":" + (++sequence) + ",\"deviceId\":\"" + Escape(deviceId) + "\",\"deviceName\":\"" + Escape(deviceName) + "\",\"displayName\":\"" + Escape(chosenDisplayName) + "\",\"color\":\"" + Escape(chosenColorHex) + "\",\"payload\":" + json + "}";
+      string wrapped = PongCircleUdpProtocol.BuildMessage(
+        ++sequence,
+        deviceId,
+        deviceName,
+        chosenDisplayName,
+        chosenColorHex,
+        payload);
       byte[] data = Encoding.UTF8.GetBytes(wrapped);
       try {
         udp.Send(data, data.Length);
@@ -391,30 +395,7 @@ public class PongCircleUdpClient : MonoBehaviour
         return onScreenDirection;
       }
 
-      Keyboard keyboard = Keyboard.current;
-      if (keyboard == null) {
-        return 0;
-      }
-
-      float arrowDirection = ReadPair(keyboard.upArrowKey, null, keyboard.downArrowKey);
-      if (Mathf.Abs(arrowDirection) > 0) {
-        return arrowDirection;
-      }
-
-      return ReadPair(keyboard.zKey, keyboard.wKey, keyboard.sKey);
-    }
-
-    float ReadPair(KeyControl positive, KeyControl alternativePositive, KeyControl negative) {
-      float direction = 0;
-      if ((positive != null && positive.isPressed) || (alternativePositive != null && alternativePositive.isPressed)) {
-        direction += 1;
-      }
-
-      if (negative != null && negative.isPressed) {
-        direction -= 1;
-      }
-
-      return Mathf.Clamp(direction, -1, 1);
+      return PongCircleKeyboardInput.ReadNetworkDirection();
     }
 
     string LoadOrCreateDeviceId() {
@@ -449,7 +430,4 @@ public class PongCircleUdpClient : MonoBehaviour
       return name;
     }
 
-    string Escape(string value) {
-      return (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
-    }
 }

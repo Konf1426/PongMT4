@@ -43,23 +43,8 @@ public class PongCircleHud : MonoBehaviour
 
     TextField nameField;
     VisualElement colorRow;
-    string chosenName = "";
-    Color chosenColor;
-    int chosenColorIndex = -1;
+    PongCircleIdentity identity;
     int lastIdentityTarget = -2;
-
-    static readonly Color[] Palette = {
-        new Color(0.345f, 0.902f, 0.784f), // turquoise
-        new Color(0.961f, 0.353f, 0.408f), // rouge
-        new Color(0.984f, 0.686f, 0.243f), // orange
-        new Color(0.969f, 0.878f, 0.318f), // jaune
-        new Color(0.486f, 0.812f, 0.380f), // vert
-        new Color(0.388f, 0.616f, 0.961f), // bleu
-        new Color(0.706f, 0.514f, 0.961f), // violet
-        new Color(0.961f, 0.510f, 0.776f), // rose
-        new Color(0.380f, 0.835f, 0.961f), // cyan
-        new Color(0.741f, 0.910f, 0.376f), // citron vert
-    };
 
     void OnEnable()
     {
@@ -104,14 +89,14 @@ public class PongCircleHud : MonoBehaviour
         // Identité : nom + palette de couleurs
         nameField = root.Q<TextField>("join-name");
         colorRow = root.Q<VisualElement>("join-colors");
-        LoadIdentityPrefs();
+        identity = PongCircleIdentityStore.Load();
         if (nameField != null)
         {
-            nameField.SetValueWithoutNotify(chosenName);
+            nameField.SetValueWithoutNotify(identity.Name);
             nameField.RegisterValueChangedCallback(e =>
             {
-                chosenName = e.newValue;
-                SaveIdentityPrefs();
+                identity = PongCircleIdentityStore.WithName(identity, e.newValue);
+                PongCircleIdentityStore.Save(identity);
                 ApplyIdentity();
                 SendIdentityToServer();
             });
@@ -257,12 +242,12 @@ public class PongCircleHud : MonoBehaviour
     {
         if (colorRow == null) return;
         colorRow.Clear();
-        for (int i = 0; i < Palette.Length; i++)
+        for (int i = 0; i < PongCircleIdentityStore.Palette.Length; i++)
         {
             int index = i;
             Button swatch = new Button();
             swatch.AddToClassList("color-swatch");
-            swatch.style.backgroundColor = Palette[i];
+            swatch.style.backgroundColor = PongCircleIdentityStore.Palette[i];
             swatch.clicked += () => SelectColor(index);
             colorRow.Add(swatch);
         }
@@ -271,9 +256,8 @@ public class PongCircleHud : MonoBehaviour
 
     void SelectColor(int index)
     {
-        chosenColorIndex = index;
-        chosenColor = Palette[index];
-        SaveIdentityPrefs();
+        identity = PongCircleIdentityStore.WithColor(identity, index);
+        PongCircleIdentityStore.Save(identity);
         UpdateSwatchSelection();
         ApplyIdentity();
         SendIdentityToServer();
@@ -283,8 +267,7 @@ public class PongCircleHud : MonoBehaviour
     void SendIdentityToServer()
     {
         if (!ShouldUseUdp()) return;
-        string hex = chosenColorIndex >= 0 ? ColorUtility.ToHtmlStringRGB(chosenColor) : "";
-        Udp.SetIdentity(chosenName, hex);
+        Udp.SetIdentity(identity.Name, identity.ColorHex);
     }
 
     void UpdateSwatchSelection()
@@ -293,7 +276,7 @@ public class PongCircleHud : MonoBehaviour
         int i = 0;
         foreach (VisualElement child in colorRow.Children())
         {
-            child.EnableInClassList("color-swatch--selected", i == chosenColorIndex);
+            child.EnableInClassList("color-swatch--selected", i == identity.ColorIndex);
             i++;
         }
     }
@@ -311,8 +294,8 @@ public class PongCircleHud : MonoBehaviour
         int i = 0;
         foreach (VisualElement child in colorRow.Children())
         {
-            string hex = ColorUtility.ToHtmlStringRGB(Palette[i]);
-            bool blocked = i != chosenColorIndex && taken.Contains(hex);
+            string hex = ColorUtility.ToHtmlStringRGB(PongCircleIdentityStore.Palette[i]);
+            bool blocked = i != identity.ColorIndex && taken.Contains(hex);
             child.SetEnabled(!blocked);
             i++;
         }
@@ -349,13 +332,13 @@ public class PongCircleHud : MonoBehaviour
         int index = IdentityTargetIndex();
         if (Game == null || index < 0 || index >= Game.CurrentPlayerCount) return;
 
-        if (!string.IsNullOrWhiteSpace(chosenName))
+        if (!string.IsNullOrWhiteSpace(identity.Name))
         {
-            Game.SetPlayerName(index, chosenName);
+            Game.SetPlayerName(index, identity.Name);
         }
-        if (chosenColorIndex >= 0)
+        if (identity.HasColor)
         {
-            Game.SetPlayerColor(index, chosenColor);
+            Game.SetPlayerColor(index, identity.Color);
         }
     }
 
@@ -368,27 +351,6 @@ public class PongCircleHud : MonoBehaviour
             lastIdentityTarget = index;
             if (index >= 0) ApplyIdentity();
         }
-    }
-
-    void LoadIdentityPrefs()
-    {
-        chosenName = PlayerPrefs.GetString("pong_name", "");
-        chosenColorIndex = PlayerPrefs.GetInt("pong_color_index", -1);
-        if (chosenColorIndex >= 0 && chosenColorIndex < Palette.Length)
-        {
-            chosenColor = Palette[chosenColorIndex];
-        }
-        else
-        {
-            chosenColorIndex = -1;
-        }
-    }
-
-    void SaveIdentityPrefs()
-    {
-        PlayerPrefs.SetString("pong_name", chosenName ?? "");
-        PlayerPrefs.SetInt("pong_color_index", chosenColorIndex);
-        PlayerPrefs.Save();
     }
 
     void RefreshLobby()

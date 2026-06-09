@@ -13,7 +13,7 @@ public class PongCircleHud : MonoBehaviour
     bool bound;
 
     // Panels
-    VisualElement panelJoin, panelLobby, panelHud, panelWin, mobileControls;
+    VisualElement panelJoin, panelLobby, panelHud, panelWin, panelEliminated, mobileControls;
 
     // Join panel
     Button btnJoin;
@@ -84,6 +84,7 @@ public class PongCircleHud : MonoBehaviour
         panelLobby = root.Q<VisualElement>("panel-lobby");
         panelHud = root.Q<VisualElement>("panel-hud");
         panelWin = root.Q<VisualElement>("panel-win");
+        panelEliminated = root.Q<VisualElement>("panel-eliminated");
         mobileControls = root.Q<VisualElement>("mobile-controls");
 
         // Join
@@ -206,11 +207,13 @@ public class PongCircleHud : MonoBehaviour
 
         bool showJoin = (network && localId <= 0) || (network && !started && !hasWinner);
         bool showWin = !showJoin && hasWinner;
-        bool showLobby = !showJoin && !showWin && !network && !started;
-        bool showHud = !showJoin && !showWin && !showLobby;
+        bool showEliminated = !showJoin && !showWin && network && started && localId > 0 && !Game.IsLocalPlayerAlive;
+        bool showLobby = !showJoin && !showWin && !showEliminated && !network && !started;
+        bool showHud = !showJoin && !showWin && !showEliminated && !showLobby;
 
         Show(panelJoin, showJoin);
         Show(panelWin, showWin);
+        Show(panelEliminated, showEliminated);
         Show(panelLobby, showLobby);
         Show(panelHud, showHud);
 
@@ -415,8 +418,9 @@ public class PongCircleHud : MonoBehaviour
 
     void RefreshWin(bool network)
     {
-        SetText(winTitle, Game.GetPlayerName(Game.WinnerId) + " gagne !");
-        SetText(winSubtitle, "Dernier joueur en vie");
+        bool iWon = network && Game.WinnerId > 0 && LocalPlayerId() == Game.WinnerId;
+        SetText(winTitle, iWon ? "Vous avez gagné !" : Game.GetPlayerName(Game.WinnerId) + " gagne !");
+        SetText(winSubtitle, iWon ? "Dernier joueur en vie" : "Vous avez perdu");
         Show(winVotes, network);
         Show(winCountdown, network);
         Show(btnReturn, network);
@@ -583,6 +587,7 @@ public class PongCircleHud : MonoBehaviour
         Show(panelLobby, false);
         Show(panelHud, false);
         Show(panelWin, false);
+        Show(panelEliminated, false);
         Show(mobileControls, false);
     }
 }

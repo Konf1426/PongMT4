@@ -66,6 +66,13 @@ public class PongCircleGame : MonoBehaviour
       }
     }
 
+    public bool IsLocalPlayerAlive {
+      get {
+        CirclePlayer player = FindPlayerById(networkLocalPlayerId);
+        return player != null && player.IsAlive;
+      }
+    }
+
     readonly List<CirclePlayer> players = new List<CirclePlayer>();
     readonly List<PlayerProfile> profiles = new List<PlayerProfile>();
     readonly List<GameObject> generatedObjects = new List<GameObject>();
@@ -407,7 +414,9 @@ public class PongCircleGame : MonoBehaviour
       bool ballActive = gameStarted && !gameOver;
       if (Ball != null) {
         Ball.SetActive(ballActive);
-        if (!NetworkSmoothing || !hasNetworkBall) {
+        Vector2 rendered = new Vector2(Ball.transform.position.x, Ball.transform.position.y);
+        bool bigJump = Vector2.Distance(rendered, authoritativeBall) > ArenaRadius * 0.6f;
+        if (!NetworkSmoothing || !hasNetworkBall || bigJump) {
           Ball.transform.position = new Vector3(authoritativeBall.x, authoritativeBall.y, ballStartPosition.z);
         }
       }

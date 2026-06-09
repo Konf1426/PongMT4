@@ -29,6 +29,9 @@ public class PongCircleGame : MonoBehaviour
     public bool NetworkControlled = false;
     public GameObject Ball;
 
+    [Header("Effets visuels")]
+    public bool EnableJuice = true;
+
     [Header("Réseau — lissage (réduction de latence ressentie)")]
     public bool NetworkSmoothing = true;
     public bool LocalPaddlePrediction = true;
@@ -66,6 +69,13 @@ public class PongCircleGame : MonoBehaviour
       }
     }
 
+    public bool IsLocalPlayerAlive {
+      get {
+        CirclePlayer player = FindPlayerById(networkLocalPlayerId);
+        return player != null && player.IsAlive;
+      }
+    }
+
     readonly List<CirclePlayer> players = new List<CirclePlayer>();
     readonly List<PlayerProfile> profiles = new List<PlayerProfile>();
     readonly List<GameObject> generatedObjects = new List<GameObject>();
@@ -86,6 +96,16 @@ public class PongCircleGame : MonoBehaviour
     Vector2 netBallPosition;
     Vector2 netBallDirection;
     bool hasNetworkBall;
+
+    // Effets "juice" : shake caméra + détection de rebond (pop + pulse de raquette).
+    Camera juiceCamera;
+    Vector3 cameraBasePos;
+    bool cameraCaptured;
+    float shakeIntensity;
+    Vector2 prevBallDir;
+    bool hasPrevBallDir;
+    int lastAlivePlayerCount = -1;
+    int lastWinnerIdSeen;
 
     void OnEnable() {
       if (!Application.isPlaying) {
@@ -146,7 +166,7 @@ public class PongCircleGame : MonoBehaviour
         return;
       }
 
-      if (!gameStarted && !gameOver) {
+      if (!NetworkControlled && !gameStarted && !gameOver) {
         UpdateLobbyCountdown();
       }
 
@@ -407,13 +427,18 @@ public class PongCircleGame : MonoBehaviour
       bool ballActive = gameStarted && !gameOver;
       if (Ball != null) {
         Ball.SetActive(ballActive);
-        if (!NetworkSmoothing || !hasNetworkBall) {
+        Vector2 rendered = new Vector2(Ball.transform.position.x, Ball.transform.position.y);
+        bool bigJump = Vector2.Distance(rendered, authoritativeBall) > ArenaRadius * 0.6f;
+        if (!NetworkSmoothing || !hasNetworkBall || bigJump) {
           Ball.transform.position = new Vector3(authoritativeBall.x, authoritativeBall.y, ballStartPosition.z);
         }
       }
       netBallPosition = authoritativeBall;
       netBallDirection = new Vector2(snapshot.ballDirX, snapshot.ballDirY);
       hasNetworkBall = ballActive;
+
+      DetectBounceEffects(authoritativeBall, netBallDirection);
+      DetectStateEffects();
     }
 
     void BuildArena(int playerCount) {
@@ -513,13 +538,19 @@ public class PongCircleGame : MonoBehaviour
       return CreateMaterial(color, 0f);
     }
 
-    Material CreateMaterial(Color color, float emission) {
-      Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-      if (shader == null) {
-        shader = Shader.Find("Standard");
+    Shader ResolveShader(params string[] names) {
+      foreach (string name in names) {
+        Shader shader = Shader.Find(name);
+        if (shader != null) {
+          return shader;
+        }
       }
 
-      Material material = new Material(shader);
+      return Shader.Find("Hidden/InternalErrorShader");
+    }
+
+    Material CreateMaterial(Color color, float emission) {
+      Material material = new Material(ResolveShader("Universal Render Pipeline/Lit", "Standard"));
       material.color = color;
       if (material.HasProperty("_BaseColor")) {
         material.SetColor("_BaseColor", color);
@@ -549,12 +580,7 @@ public class PongCircleGame : MonoBehaviour
     }
 
     Material CreateUnlitHdrMaterial(Color color, float intensity) {
-      Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
-      if (shader == null) {
-        shader = Shader.Find("Unlit/Color");
-      }
-
-      Material material = new Material(shader);
+      Material material = new Material(ResolveShader("Universal Render Pipeline/Unlit", "Unlit/Color"));
       Color hdr = color.linear * intensity;
       if (material.HasProperty("_BaseColor")) {
         material.SetColor("_BaseColor", hdr);
@@ -617,6 +643,133 @@ public class PongCircleGame : MonoBehaviour
       trail.endColor = new Color(NeonAccent.r, NeonAccent.g, NeonAccent.b, 0f);
     }
 
+    // --- Effets "juice" -------------------------------------------------------
+
+    // Secousse de caméra : appliquée après tout le reste pour ne pas être écrasée.
+    void LateUpdate() {
+      if (!Application.isPlaying) {
+        return;
+      }
+      UpdateShake();
+    }
+
+    void AddShake(float amount) {
+      if (EnableJuice) {
+        shakeIntensity = Mathf.Max(shakeIntensity, amount);
+      }
+    }
+
+    void UpdateShake() {
+      if (juiceCamera == null) {
+        juiceCamera = Camera.main;
+        if (juiceCamera == null) {
+          return;
+        }
+        cameraBasePos = juiceCamera.transform.localPosition;
+        cameraCaptured = true;
+      }
+
+      if (!cameraCaptured) {
+        cameraBasePos = juiceCamera.transform.localPosition;
+        cameraCaptured = true;
+      }
+
+      if (shakeIntensity > 0.0001f) {
+        Vector3 offset = new Vector3(Random.value * 2f - 1f, Random.value * 2f - 1f, 0f) * shakeIntensity;
+        juiceCamera.transform.localPosition = cameraBasePos + offset;
+        shakeIntensity = Mathf.Max(0f, shakeIntensity - Time.deltaTime * 1.8f);
+        if (shakeIntensity <= 0.0001f) {
+          juiceCamera.transform.localPosition = cameraBasePos;
+        }
+      }
+    }
+
+    // Détecte élimination (baisse du nb de vivants) et victoire → secousse.
+    void DetectStateEffects() {
+      if (!EnableJuice) {
+        return;
+      }
+
+      int alive = CountAlivePlayers();
+      if (lastAlivePlayerCount >= 0 && alive < lastAlivePlayerCount && gameStarted) {
+        AddShake(0.18f);
+      }
+      lastAlivePlayerCount = alive;
+
+      if (winnerId > 0 && winnerId != lastWinnerIdSeen) {
+        AddShake(0.30f);
+        lastWinnerIdSeen = winnerId;
+      } else if (winnerId == 0) {
+        lastWinnerIdSeen = 0;
+      }
+    }
+
+    // Détecte un rebond (balle près du bord + direction qui s'inverse) → pop + pulse.
+    void DetectBounceEffects(Vector2 ballPos, Vector2 dir) {
+      if (!Application.isPlaying || !EnableJuice) {
+        prevBallDir = dir;
+        hasPrevBallDir = true;
+        return;
+      }
+
+      if (hasPrevBallDir && gameStarted && !gameOver) {
+        bool nearRim = ballPos.magnitude > ArenaRadius * 0.7f;
+        float d = Vector2.Dot(prevBallDir.normalized, dir.normalized);
+        if (nearRim && d < 0.5f) {
+          float angleDeg = Mathf.Atan2(ballPos.y, ballPos.x) * Mathf.Rad2Deg;
+          Vector3 impact = AngleToDirection(angleDeg) * ArenaRadius;
+          impact.z = ballStartPosition.z;
+          PlayBounceEffect(impact);
+          PulsePaddleAtAngle(angleDeg);
+        }
+      }
+
+      prevBallDir = dir;
+      hasPrevBallDir = true;
+    }
+
+    void PlayBounceEffect(Vector3 pos) {
+      AddShake(0.05f);
+      StartCoroutine(PopRoutine(pos));
+    }
+
+    System.Collections.IEnumerator PopRoutine(Vector3 pos) {
+      GameObject pop = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+      pop.name = "BouncePop";
+      Collider collider = pop.GetComponent<Collider>();
+      if (collider != null) {
+        DestroyObject(collider);
+      }
+      pop.transform.SetParent(transform);
+      pop.transform.position = pos;
+      pop.GetComponent<Renderer>().material = CreateUnlitHdrMaterial(NeonAccent, 2.6f);
+
+      float t = 0f;
+      const float duration = 0.22f;
+      while (t < duration) {
+        t += Time.deltaTime;
+        float k = Mathf.Clamp01(t / duration);
+        float scale = Mathf.Sin(k * Mathf.PI) * 1.0f + 0.15f; // grossit puis disparaît
+        pop.transform.localScale = Vector3.one * scale;
+        yield return null;
+      }
+      Destroy(pop);
+    }
+
+    void PulsePaddleAtAngle(float angleDeg) {
+      foreach (CirclePlayer player in players) {
+        if (!player.IsAlive) {
+          continue;
+        }
+        float center = Mathf.LerpAngle(player.SectorStartAngle, player.SectorEndAngle, 0.5f);
+        float halfSector = Mathf.Abs(Mathf.DeltaAngle(player.SectorStartAngle, player.SectorEndAngle)) * 0.5f;
+        if (Mathf.Abs(Mathf.DeltaAngle(center, angleDeg)) <= halfSector) {
+          player.PulseTime = 0.18f;
+          return;
+        }
+      }
+    }
+
     void UpdatePaddles() {
       if (!gameStarted) {
         return;
@@ -648,12 +801,18 @@ public class PongCircleGame : MonoBehaviour
           continue;
         }
 
+        float pulse = 1f;
+        if (player.PulseTime > 0f) {
+          player.PulseTime -= Time.deltaTime;
+          pulse = 1f + Mathf.Clamp01(player.PulseTime / 0.18f) * 0.5f;
+        }
+
         Vector3 radial = AngleToDirection(player.PaddleAngle);
         Vector3 tangent = new Vector3(-radial.y, radial.x, 0);
         Transform paddle = player.PaddleObject.transform;
         paddle.position = radial * (ArenaRadius - PaddleWidth * 0.5f);
         paddle.rotation = Quaternion.LookRotation(Vector3.forward, tangent);
-        paddle.localScale = new Vector3(PaddleWidth, paddleLength, 0.35f);
+        paddle.localScale = new Vector3(PaddleWidth * pulse, paddleLength * pulse, 0.35f);
       }
     }
 
@@ -1159,7 +1318,8 @@ public class PongCircleGame : MonoBehaviour
       public float SectorStartAngle;
       public float SectorEndAngle;
       public float PaddleAngle;
-      public float PaddleAngleTarget;   
+      public float PaddleAngleTarget;
+      public float PulseTime;
       public GameObject SectorObject;
       public GameObject PaddleObject;
 

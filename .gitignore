@@ -52,3 +52,6 @@ crashlytics-build.properties
 /[Aa]ssets/[Aa]ddressable[Aa]ssetsData/*/*.bin*
 /[Aa]ssets/[Ss]treamingAssets/aa.meta
 /[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# ─── Données runtime du serveur (scores persistants) ───
+/server/scores.json

@@ -18,6 +18,7 @@ public class PongCircleUdpClient : MonoBehaviour
     public int ServerPort = 41234;
     public bool AutoConnect = true;
     public float InputSendRate = 30;
+    public bool DebugNetworkLogging = false;
 
     public bool IsConnected {
       get { return connected; }
@@ -173,11 +174,25 @@ public class PongCircleUdpClient : MonoBehaviour
           return;
         }
 
-        serverEndPoint = new IPEndPoint(addresses[0], ServerPort);
-        udp = new UdpClient(AddressFamily.InterNetwork);
+        IPAddress serverAddress = null;
+        for (int i = 0; i < addresses.Length; i++) {
+          if (addresses[i].AddressFamily == AddressFamily.InterNetwork) {
+            serverAddress = addresses[i];
+            break;
+          }
+        }
+
+        if (serverAddress == null) {
+          lastStatus = "UDP DNS IPv4 failed";
+          return;
+        }
+
+        serverEndPoint = new IPEndPoint(serverAddress, ServerPort);
+        udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
         stopping = false;
         connected = true;
         lastStatus = "UDP connected to " + ServerHost + ":" + ServerPort;
+        LogNetwork("Connected endpoint " + serverEndPoint + " from " + udp.Client.LocalEndPoint);
 
         if (CircleGame != null) {
           CircleGame.SetNetworkControlled(true);
@@ -258,9 +273,10 @@ public class PongCircleUdpClient : MonoBehaviour
           lock (receivedMessagesLock) {
             receivedMessages.Enqueue(message);
           }
-        } catch {
+        } catch (Exception exception) {
           if (!stopping) {
             connected = false;
+            lastStatus = "UDP receive failed: " + exception.Message;
           }
           return;
         }
@@ -283,6 +299,7 @@ public class PongCircleUdpClient : MonoBehaviour
           return;
         }
 
+        LogNetwork("Received " + message);
         HandleMessage(message);
       }
     }
@@ -371,11 +388,22 @@ public class PongCircleUdpClient : MonoBehaviour
         payload);
       byte[] data = Encoding.UTF8.GetBytes(wrapped);
       try {
-        udp.Send(data, data.Length, serverEndPoint);
+        LogNetwork("Sending " + data.Length + " bytes to " + serverEndPoint + " " + wrapped);
+        int sent = udp.Send(data, data.Length, serverEndPoint);
+        LogNetwork("Sent " + sent + " bytes from " + udp.Client.LocalEndPoint);
       } catch (Exception exception) {
         connected = false;
         lastStatus = "UDP send failed: " + exception.Message;
+        Debug.LogWarning(lastStatus);
       }
+    }
+
+    void LogNetwork(string message) {
+      if (!DebugNetworkLogging) {
+        return;
+      }
+
+      Debug.Log("[Pong UDP] " + message);
     }
 
     void EnsureCircleGame() {

@@ -10,6 +10,7 @@ const { createSnapshotBuilder } = require("./snapshot-builder");
 const UDP_PORT = Number(process.env.UDP_PORT || 41234);
 const HEALTH_PORT = Number(process.env.UDP_HEALTH_PORT || 8082);
 const SERVER_VERSION = "udp-authoritative-2026-06-03-01";
+const DEBUG_UDP = process.env.UDP_DEBUG === "1";
 
 const arenaRadius = 5;
 const paddleArcDegrees = 22;
@@ -21,7 +22,7 @@ const maximumPlayers = 10;
 const clientTimeoutMs = 10000;
 
 
-const startCountdownMs = 10000;    
+const startCountdownMs = 5000;    
 const joinGraceMs = 2000;         
 const startCountdownMaxMs = 15000;  
 
@@ -93,10 +94,17 @@ function pointsForPlayer(player) {
 }
 
 socket.on("message", (buffer, remote) => {
+  if (DEBUG_UDP) {
+    console.log(`[udp] ${remote.address}:${remote.port} ${buffer.toString("utf8")}`);
+  }
+
   let envelope;
   try {
     envelope = JSON.parse(buffer.toString("utf8"));
-  } catch {
+  } catch (error) {
+    if (DEBUG_UDP) {
+      console.log(`[udp] rejected invalid json: ${error.message}`);
+    }
     return;
   }
 
@@ -104,6 +112,9 @@ socket.on("message", (buffer, remote) => {
   const deviceId = clients.sanitizeId(envelope.deviceId || payload.deviceId || "");
   const deviceName = clients.sanitizeDeviceName(envelope.deviceName || payload.deviceName || "");
   if (!deviceId) {
+    if (DEBUG_UDP) {
+      console.log("[udp] rejected packet without deviceId");
+    }
     return;
   }
 

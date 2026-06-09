@@ -21,6 +21,8 @@ public class PongCircleNetworkSnapshot
     public float ballY;
     public float ballDirX;
     public float ballDirY;
+    public float ballSpeed;
+    public bool ballDeadly;
     public PongCircleNetworkDeviceState[] devices;
     public PongCircleNetworkDeviceState[] lobbyDevices;
     public PongCircleNetworkPlayerState[] players;

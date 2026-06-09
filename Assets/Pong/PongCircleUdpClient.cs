@@ -95,6 +95,7 @@ public class PongCircleUdpClient : MonoBehaviour
     float onScreenDirectionTime;
     float lastSentDirection = 999f;
     int redundantSendsLeft;
+    float smashCooldownUntil;
 
     void Awake() {
       EnsureCircleGame();
@@ -125,6 +126,15 @@ public class PongCircleUdpClient : MonoBehaviour
 
       if (localPlayerId <= 0) {
         return;
+      }
+
+      if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame
+          && Time.unscaledTime >= smashCooldownUntil) {
+        SendSmash();
+        smashCooldownUntil = Time.unscaledTime + 1.5f;
+        if (CircleGame != null) {
+          CircleGame.ArmLocalSmash();
+        }
       }
 
       float direction = ReadLocalDirection();
@@ -338,6 +348,10 @@ public class PongCircleUdpClient : MonoBehaviour
 
     void SendJoin() {
       SendMessage("{\"type\":\"join\"}");
+    }
+
+    public void SendSmash() {
+      SendMessage("{\"type\":\"smash\"}");
     }
 
     void SendInput(float direction) {

@@ -18,7 +18,7 @@ public class PongCircleHud : MonoBehaviour
     // Join panel
     Button btnJoin;
     Label joinTitle, joinSubtitle, joinYourPlayer, joinNetwork, joinPlayers, joinMin, joinHint, joinCountdown;
-    VisualElement joinDevices, joinLobbyDevices;
+    VisualElement joinDevices, joinLobbyDevices, joinIdentity;
 
     // Local lobby panel
     Button btnLobbyStart, btnLobbyApply, btnLobbyMinus, btnLobbyPlus;
@@ -98,6 +98,7 @@ public class PongCircleHud : MonoBehaviour
         joinCountdown = root.Q<Label>("join-countdown");
         joinDevices = root.Q<VisualElement>("join-devices");
         joinLobbyDevices = root.Q<VisualElement>("join-lobby-devices");
+        joinIdentity = root.Q<VisualElement>("join-identity");
         btnJoin = root.Q<Button>("btn-join");
         if (btnJoin != null) btnJoin.clicked += OnJoinClicked;
 
@@ -230,25 +231,41 @@ public class PongCircleHud : MonoBehaviour
 
     void RefreshJoin(int localId)
     {
+        int countdown = StartCountdownSeconds();
+        bool counting = countdown > 0;
+
+        Show(joinTitle, !counting);
+        Show(joinSubtitle, !counting);
+        Show(joinIdentity, !counting);
+        Show(btnJoin, !counting);
+        Show(joinNetwork, !counting);
+        Show(joinPlayers, !counting);
+        Show(joinHint, !counting);
+        Show(joinYourPlayer, !counting && localId > 0);
+        Show(joinMin, !counting && !Game.IsGameStarted);
+        Show(joinCountdown, counting);
+
+        if (counting)
+        {
+            SetText(joinCountdown, countdown.ToString());
+            joinCountdown.style.fontSize = 96;
+            joinCountdown.style.unityTextAlign = TextAnchor.MiddleCenter;
+            return;
+        }
+
         SetText(btnJoin, Game.IsGameStarted ? "Rejoindre la partie" : "Jouer / Rejoindre");
         SetText(joinNetwork, "Réseau : " + NetworkStatus());
         SetText(joinPlayers, "Joueurs : " + ConnectedPlayerCount() + " / " + Game.MaximumPlayers);
         SetText(joinMin, "Minimum pour lancer : " + Game.MinimumPlayers);
-        Show(joinMin, !Game.IsGameStarted);
-
-        int countdown = StartCountdownSeconds();
-        Show(joinCountdown, countdown > 0);
-        if (countdown > 0) SetText(joinCountdown, "Démarrage dans " + countdown + " s…");
-
-        Show(joinYourPlayer, localId > 0);
         if (localId > 0) SetText(joinYourPlayer, "Votre joueur : " + localId);
 
         SetText(joinHint, localId > 0
             ? "La partie se lance quand assez de joueurs ont rejoint."
             : "Tu es dans le menu tant que tu n'as pas rejoint la partie.");
 
-        RebuildInGameDevices(joinDevices, ref sigJoinDevices);
-        RebuildLobbyDevices(joinLobbyDevices, ref sigJoinLobby);
+        // Listes "En jeu" / "Lobby" masquées dans le menu d'accueil.
+        // RebuildInGameDevices(joinDevices, ref sigJoinDevices);
+        // RebuildLobbyDevices(joinLobbyDevices, ref sigJoinLobby);
         RefreshSwatchAvailability();
     }
 

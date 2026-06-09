@@ -63,12 +63,12 @@
             <ui:Button text="Retour lobby" name="btn-return" class="secondary-button" />
         </ui:VisualElement>
 
-        <!-- Joueur éliminé -->
+         <!-- Joueur éliminé -->
         <ui:VisualElement name="panel-eliminated" class="card card--center">
             <ui:Label text="Tu as été éliminé" name="eliminated-title" class="card-title" />
             <ui:Label text="En attente de la fin de la manche…" class="card-subtitle" />
-        </ui:VisualElement>
-
+        </ui:VisualElement> 
+        
         <!-- Contrôles tactiles -->
         <ui:VisualElement name="mobile-controls" class="mobile-bar">
             <ui:Button text="←" name="btn-left" class="mobile-btn" />

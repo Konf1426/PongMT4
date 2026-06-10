@@ -101,6 +101,7 @@ public class PongCircleUdpClient : MonoBehaviour
     int redundantSendsLeft;
 
     void Awake() {
+      Application.runInBackground = true;
       EnsureCircleGame();
       ApplyEditorDefaultHost();
       ApplyLauncherEnvironment();

@@ -43,6 +43,7 @@ public class PongCircleNetworkPlayerState
     public int id;
     public bool alive;
     public float paddleAngle;
+    public float input;
     public string name;
     public string color;
     public int lives;

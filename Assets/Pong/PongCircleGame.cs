@@ -34,9 +34,10 @@ public class PongCircleGame : MonoBehaviour
     [Header("Réseau — lissage (réduction de latence ressentie)")]
     public bool NetworkSmoothing = true;
     public bool LocalPaddlePrediction = true;
-    public float PaddleSmoothingSpeed = 14f;   
-    public float PaddleReconcileSpeed = 2f;     
-    public float BallSmoothingSpeed = 12f;      
+    public bool RemoteDeadReckoning = true;
+    public float PaddleSmoothingSpeed = 14f;
+    public float PaddleReconcileSpeed = 2f;
+    public float BallSmoothingSpeed = 12f;
 
     public int CurrentPlayerCount {
       get {
@@ -167,6 +168,11 @@ public class PongCircleGame : MonoBehaviour
         return;
       }
 
+      if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame) {
+        RemoteDeadReckoning = !RemoteDeadReckoning;
+        Debug.Log("Dead reckoning (remote paddles) : " + (RemoteDeadReckoning ? "ON" : "OFF"));
+      }
+
       if (!NetworkControlled && !gameStarted && !gameOver) {
         UpdateLobbyCountdown();
       }
@@ -210,9 +216,15 @@ public class PongCircleGame : MonoBehaviour
 
         if (LocalPaddlePrediction && player.Id == networkLocalPlayerId) {
           player.PaddleAngle += networkLocalDirection * PaddleAngularSpeed * dt;
-          player.PaddleAngle = Mathf.LerpAngle(player.PaddleAngle, player.PaddleAngleTarget, reconcileK);
+          if (Mathf.Abs(networkLocalDirection) < 0.01f) {
+            player.PaddleAngle = Mathf.LerpAngle(player.PaddleAngle, player.PaddleAngleTarget, reconcileK);
+          }
           player.PaddleAngle = ClampPaddleAngle(player.PaddleAngle, player.SectorStartAngle, player.SectorEndAngle);
         } else {
+          if (RemoteDeadReckoning) {
+            player.PaddleAngleTarget += player.NetworkInput * PaddleAngularSpeed * dt;
+            player.PaddleAngleTarget = ClampPaddleAngle(player.PaddleAngleTarget, player.SectorStartAngle, player.SectorEndAngle);
+          }
           player.PaddleAngle = Mathf.LerpAngle(player.PaddleAngle, player.PaddleAngleTarget, remoteK);
         }
       }
@@ -400,8 +412,7 @@ public class PongCircleGame : MonoBehaviour
           }
 
           player.IsAlive = playerState.alive;
-          // Cible réseau autoritative ; le lissage (Update) rapproche PaddleAngle de
-          // cette cible. Au 1er snapshot (ou lissage désactivé), on cale directement.
+          player.NetworkInput = playerState.input;
           player.PaddleAngleTarget = playerState.paddleAngle;
           if (!player.HasPaddleAngle || !NetworkSmoothing) {
             player.PaddleAngle = playerState.paddleAngle;
@@ -1032,6 +1043,7 @@ public class PongCircleGame : MonoBehaviour
       public float SectorEndAngle;
       public float PaddleAngle;
       public float PaddleAngleTarget;
+      public float NetworkInput;
       public float PulseTime;
       public GameObject SectorObject;
       public GameObject PaddleObject;

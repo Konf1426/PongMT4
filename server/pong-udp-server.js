@@ -17,7 +17,7 @@ const maximumPlayers = 10;
 const clientTimeoutMs = 10000;
 
 
-const startCountdownMs = 10000;    
+const startCountdownMs = 5000;    
 const joinGraceMs = 2000;         
 const startCountdownMaxMs = 15000;  
 
@@ -176,7 +176,16 @@ socket.on("message", (buffer, remote) => {
     return;
   }
 
+  if (payload.type === "spectate") {
+    spectateGame(client);
+    broadcastSnapshot();
+    return;
+  }
+
   if (payload.type === "input") {
+    if (client.spectator || client.playerId <= 0) {
+      return;
+    }
     client.input = clamp(Number(payload.direction) || 0, -1, 1);
     client.lastSeen = Date.now();
     return;
@@ -224,6 +233,7 @@ http.createServer((req, res) => {
     udpPort: UDP_PORT,
     connectedPlayerCount: game.connectedPlayerCount,
     readyPlayerCount: game.readyPlayerCount,
+    spectatorCount: countSpectators(),
     playerCount: game.playerCount,
     lobbyOpen: game.lobbyOpen,
     gameStarted: game.gameStarted,
@@ -251,6 +261,7 @@ function registerClient(deviceId, deviceName, remote) {
       port: remote.port,
       playerId: 0,
       ready: false,
+      spectator: false,
       input: 0,
       wantsReplay: false,
       lastSeen: Date.now()
@@ -299,7 +310,7 @@ function sanitizeColor(value) {
 function isColorTakenByOther(color, self) {
   const target = color.toLowerCase();
   for (const client of getConnectedClients()) {
-    if (client !== self && client.color && client.color.toLowerCase() === target) {
+    if (client !== self && !client.spectator && client.color && client.color.toLowerCase() === target) {
       return true;
     }
   }
@@ -321,6 +332,7 @@ function joinGame(client) {
     return;
   }
 
+  client.spectator = false;
   client.ready = true;
 
   if (game.gameStarted && !game.gameOver) {
@@ -335,6 +347,25 @@ function joinGame(client) {
   game.postGameDeadline = 0;
   game.winnerId = 0;
   assignLobbyPlayers();
+}
+
+function spectateGame(client) {
+  if (!client) {
+    return;
+  }
+
+  client.ready = false;
+  client.spectator = true;
+  client.input = 0;
+  client.wantsReplay = false;
+  client.playerId = 0;
+
+  if (!game.gameStarted && !game.gameOver) {
+    assignLobbyPlayers();
+    return;
+  }
+
+  updateStatus();
 }
 
 function addReadyPlayerToRunningGame() {
@@ -359,11 +390,13 @@ function addReadyPlayerToRunningGame() {
 function resetToLobby(requestingClient) {
   for (const client of clientsByDevice.values()) {
     client.ready = false;
+    client.spectator = false;
     client.input = 0;
   }
 
   if (requestingClient) {
     requestingClient.ready = true;
+    requestingClient.spectator = false;
   }
 
   game.lobbyOpen = true;
@@ -378,6 +411,7 @@ function resetToLobby(requestingClient) {
 function returnToLobby() {
   for (const client of clientsByDevice.values()) {
     client.ready = false;
+    client.spectator = false;
     client.input = 0;
     client.wantsReplay = false;
     client.playerId = 0;
@@ -458,7 +492,7 @@ function getConnectedClients() {
 }
 
 function getReadyClients() {
-  return getConnectedClients().filter((client) => client.ready).slice(0, maximumPlayers);
+  return getConnectedClients().filter((client) => client.ready && !client.spectator).slice(0, maximumPlayers);
 }
 
 function rebuildPlayersForReadyClients(readyClients, preserveExistingPlayers) {
@@ -717,7 +751,11 @@ function countInGameDevices() {
 }
 
 function countReadyDevices() {
-  return Math.min(getConnectedClients().filter((client) => client.ready).length, maximumPlayers);
+  return Math.min(getConnectedClients().filter((client) => client.ready && !client.spectator).length, maximumPlayers);
+}
+
+function countSpectators() {
+  return getConnectedClients().filter((client) => client.spectator).length;
 }
 
 function countReplayVotes() {
@@ -857,10 +895,12 @@ function buildSnapshot(client, full = true) {
   const alivePlayerCount = game.players.filter((player) => player.alive).length;
   const snapshot = {
     type: "state",
-    localPlayerId: client ? client.playerId : 0,
+    localPlayerId: client && !client.spectator ? client.playerId : 0,
+    localIsSpectator: !!(client && client.spectator),
     lobbyOpen: game.lobbyOpen,
     connectedPlayerCount: countInGameDevices(),
     readyPlayerCount: countReadyDevices(),
+    spectatorCount: countSpectators(),
     playerCount: Math.max(minimumPlayers, Math.min(maximumPlayers, game.players.length)),
     alivePlayerCount,
     winnerId: game.winnerId,
@@ -905,7 +945,7 @@ function metaSignature() {
     .map((d) => d.playerId + ":" + d.name + ":" + d.ready + ":" + d.color + ":" + d.lives + ":" + d.points)
     .join("|");
   const lobby = buildLobbyDeviceList()
-    .map((d) => d.name + ":" + d.color)
+    .map((d) => d.name + ":" + d.color + ":" + d.spectator)
     .join("|");
   const identities = game.players
     .map((p) => {
@@ -937,6 +977,7 @@ function buildDeviceList() {
         playerId: client.playerId,
         name: clientLabel(client),
         ready: client.ready,
+        spectator: false,
         color: client.color,
         lives: player ? player.lives : 0,
         points: entry ? entry.points : 0
@@ -952,6 +993,7 @@ function buildLobbyDeviceList() {
       playerId: 0,
       name: clientLabel(client),
       ready: false,
+      spectator: !!client.spectator,
       color: client.color
     }));
 }

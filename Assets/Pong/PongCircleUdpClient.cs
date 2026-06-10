@@ -10,7 +10,11 @@ using UnityEngine.InputSystem;
 public class PongCircleUdpClient : MonoBehaviour
 {
     public PongCircleGame CircleGame;
+#if UNITY_EDITOR
+    public string ServerHost = "127.0.0.1";
+#else
     public string ServerHost = "pong.becop.fr";
+#endif
     public int ServerPort = 41234;
     public bool AutoConnect = true;
     public float InputSendRate = 30;
@@ -89,6 +93,7 @@ public class PongCircleUdpClient : MonoBehaviour
     float nextInputSendTime;
     float nextJoinRetryTime;
     float joinRetryEndTime;
+    float lastSnapshotTime;
     float onScreenDirection;
     float onScreenDirectionTime;
     float lastSentDirection = 999f;
@@ -96,6 +101,7 @@ public class PongCircleUdpClient : MonoBehaviour
 
     void Awake() {
       EnsureCircleGame();
+      ApplyEditorDefaultHost();
       ApplyLauncherEnvironment();
       deviceId = LoadOrCreateDeviceId();
       deviceName = DetectDeviceName();
@@ -120,6 +126,10 @@ public class PongCircleUdpClient : MonoBehaviour
       }
 
       RetryJoinIfNeeded();
+
+      if (joinRetryEndTime > 0 && localPlayerId <= 0 && Time.unscaledTime - lastSnapshotTime > 3f) {
+        lastStatus = "UDP waiting for server response";
+      }
 
       if (localPlayerId <= 0) {
         return;
@@ -164,11 +174,10 @@ public class PongCircleUdpClient : MonoBehaviour
         }
 
         serverEndPoint = new IPEndPoint(addresses[0], ServerPort);
-        udp = new UdpClient();
-        udp.Connect(serverEndPoint);
+        udp = new UdpClient(AddressFamily.InterNetwork);
         stopping = false;
         connected = true;
-        lastStatus = "UDP connected";
+        lastStatus = "UDP connected to " + ServerHost + ":" + ServerPort;
 
         if (CircleGame != null) {
           CircleGame.SetNetworkControlled(true);
@@ -203,7 +212,8 @@ public class PongCircleUdpClient : MonoBehaviour
     public void SendStartGame() {
       joinRetryEndTime = Time.unscaledTime + 10f;
       nextJoinRetryTime = 0;
-      lastStatus = "UDP join request sent";
+      lastSnapshotTime = Time.unscaledTime;
+      lastStatus = "UDP join sent to " + ServerHost + ":" + ServerPort;
       SendJoin();
     }
 
@@ -288,6 +298,7 @@ public class PongCircleUdpClient : MonoBehaviour
       }
 
       localPlayerId = snapshot.localPlayerId;
+      lastSnapshotTime = Time.unscaledTime;
       lobbyOpen = snapshot.lobbyOpen;
       connectedPlayerCount = snapshot.connectedPlayerCount;
       readyPlayerCount = snapshot.readyPlayerCount;
@@ -360,7 +371,7 @@ public class PongCircleUdpClient : MonoBehaviour
         payload);
       byte[] data = Encoding.UTF8.GetBytes(wrapped);
       try {
-        udp.Send(data, data.Length);
+        udp.Send(data, data.Length, serverEndPoint);
       } catch (Exception exception) {
         connected = false;
         lastStatus = "UDP send failed: " + exception.Message;
@@ -388,6 +399,15 @@ public class PongCircleUdpClient : MonoBehaviour
       if (int.TryParse(port, out int parsedPort)) {
         ServerPort = parsedPort;
       }
+    }
+
+    void ApplyEditorDefaultHost() {
+#if UNITY_EDITOR
+      string launcherHost = Environment.GetEnvironmentVariable("PONG_UDP_HOST");
+      if (string.IsNullOrEmpty(launcherHost) && ServerHost == "pong.becop.fr") {
+        ServerHost = "127.0.0.1";
+      }
+#endif
     }
 
     float ReadLocalDirection() {

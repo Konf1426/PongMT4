@@ -12,12 +12,19 @@ const paddleArcDegrees = 22;
 const paddleAngularSpeed = 120;
 const ballSpeed = 3.5;
 const paddleAimInfluence = 0.45;
+
+const smashMultiplier = 2.2;    
+const smashWindowMs = 2500;     
+
+const deadlyIntervalMs = 7000;  
+const deadlyJitterMs = 3000;    
+const smashCooldownMs = 1500;   
 const minimumPlayers = 2;
 const maximumPlayers = 10;
 const clientTimeoutMs = 10000;
 
 
-const startCountdownMs = 10000;    
+const startCountdownMs = 5000;
 const joinGraceMs = 2000;         
 const startCountdownMaxMs = 15000;  
 
@@ -26,6 +33,7 @@ const startingLives = 3;
 const survivalPoints = 1;          
 const winBonusPoints = 3;           
 const scoresFilePath = path.join(__dirname, "scores.json");
+
 
 const socket = dgram.createSocket("udp4");
 const clientsByDevice = new Map();
@@ -48,6 +56,9 @@ const game = {
   startDeadline: 0,
   countdownPlayerCount: 0,
   winnerId: 0,
+  ballSpeedMul: 1,
+  ballDeadly: false,
+  nextDeadlyTime: 0,
   status: "Waiting for someone to start a game"
 };
 
@@ -182,6 +193,15 @@ socket.on("message", (buffer, remote) => {
     return;
   }
 
+  if (payload.type === "smash") {
+    const now = Date.now();
+    if (now >= (client.smashCooldownUntil || 0)) {
+      client.smashArmedUntil = now + smashWindowMs; 
+    }
+    client.lastSeen = now;
+    return;
+  }
+
   if (payload.type === "restart") {
     resetToLobby(client);
     broadcastSnapshot();
@@ -253,6 +273,8 @@ function registerClient(deviceId, deviceName, remote) {
       ready: false,
       input: 0,
       wantsReplay: false,
+      smashArmedUntil: 0,
+      smashCooldownUntil: 0,
       lastSeen: Date.now()
     };
     clientsByDevice.set(deviceId, client);
@@ -425,6 +447,8 @@ function beginMatch() {
   game.postGameDeadline = 0;
   game.startDeadline = 0;
   game.winnerId = 0;
+  game.ballDeadly = false;
+  game.nextDeadlyTime = Date.now() + 4000;
   game.status = "Playing";
 
   for (const player of game.players) {
@@ -514,7 +538,20 @@ function tick() {
   updateInputs();
   updatePostGameTimeout();
   updatePaddles(deltaTime);
+  updateDeadlyBall();
   updateBall(deltaTime);
+}
+
+function updateDeadlyBall() {
+  if (!game.gameStarted || game.gameOver) {
+    return;
+  }
+  const now = Date.now();
+  if (!game.ballDeadly && now >= game.nextDeadlyTime) {
+    game.ballDeadly = true;
+    game.nextDeadlyTime = now + deadlyIntervalMs + Math.random() * deadlyJitterMs;
+    game.status = "Balle mortelle ! Esquive-la";
+  }
 }
 
 
@@ -643,8 +680,9 @@ function updateBall(deltaTime) {
     return;
   }
 
-  game.ballX += game.ballDirX * ballSpeed * deltaTime;
-  game.ballY += game.ballDirY * ballSpeed * deltaTime;
+  const speed = ballSpeed * game.ballSpeedMul;
+  game.ballX += game.ballDirX * speed * deltaTime;
+  game.ballY += game.ballDirY * speed * deltaTime;
 
   const radius = Math.hypot(game.ballX, game.ballY);
   if (radius < arenaRadius) {
@@ -659,7 +697,31 @@ function updateBall(deltaTime) {
   }
 
   const paddleDelta = Math.abs(deltaAngle(angle, defender.paddleAngle));
-  if (paddleDelta <= paddleArcDegrees * 0.5) {
+  const intercepts = paddleDelta <= paddleArcDegrees * 0.5;
+
+  if (game.ballDeadly) {
+    game.ballDeadly = false;
+    if (intercepts) {
+      game.status = `Player ${defender.id} touched the deadly ball! -1`;
+      concedeGoal(defender);
+    } else {
+      game.status = `Player ${defender.id} dodged the deadly ball!`;
+      resetBall();
+    }
+    return;
+  }
+
+  if (intercepts) {
+    const owner = clientForPlayerId(defender.id);
+    const now = Date.now();
+    if (owner && now <= (owner.smashArmedUntil || 0)) {
+      game.ballSpeedMul = smashMultiplier;
+      owner.smashArmedUntil = 0;
+      owner.smashCooldownUntil = now + smashCooldownMs;
+      game.status = `Player ${defender.id} SMASH!`;
+    } else {
+      game.ballSpeedMul = 1;
+    }
     bounceOnPaddle(defender, angle);
   } else {
     concedeGoal(defender);
@@ -731,31 +793,32 @@ function countReplayVotes() {
 }
 
 function bounceOnPaddle(defender, impactAngle) {
-  const impactDirection = angleToDirection(impactAngle);
-  const paddleDirection = angleToDirection(defender.paddleAngle);
-  const dot = game.ballDirX * paddleDirection.x + game.ballDirY * paddleDirection.y;
-  let reflectedX = game.ballDirX - 2 * dot * paddleDirection.x;
-  let reflectedY = game.ballDirY - 2 * dot * paddleDirection.y;
+  const impactDirection = angleToDirection(impactAngle); // radial sortant au point d'impact
+  const inwardX = -impactDirection.x;
+  const inwardY = -impactDirection.y;
 
-  const offset = deltaAngle(defender.paddleAngle, impactAngle) / Math.max(1, paddleArcDegrees * 0.5);
-  const tangent = { x: -paddleDirection.y, y: paddleDirection.x };
-  let aimedX = reflectedX + tangent.x * offset * paddleAimInfluence;
-  let aimedY = reflectedY + tangent.y * offset * paddleAimInfluence;
-  let length = Math.hypot(aimedX, aimedY) || 1;
-  aimedX /= length;
-  aimedY /= length;
+  // Rebond propre : réflexion autour de la normale radiale AU POINT D'IMPACT (et non au
+  // centre de la raquette) → angle prévisible et toujours orienté vers l'intérieur.
+  const dot = game.ballDirX * inwardX + game.ballDirY * inwardY;
+  let dirX = game.ballDirX - 2 * dot * inwardX;
+  let dirY = game.ballDirY - 2 * dot * inwardY;
 
-  const antiImpactDot = aimedX * -impactDirection.x + aimedY * -impactDirection.y;
-  if (antiImpactDot < 0.15) {
-    aimedX = lerp(aimedX, -impactDirection.x, 0.5);
-    aimedY = lerp(aimedY, -impactDirection.y, 0.5);
-    length = Math.hypot(aimedX, aimedY) || 1;
-    aimedX /= length;
-    aimedY /= length;
+  // "Effet" : pousse tangentiellement selon l'endroit touché sur la raquette (offset borné).
+  const offset = clamp(deltaAngle(defender.paddleAngle, impactAngle) / (paddleArcDegrees * 0.5), -1, 1);
+  const tangent = { x: -impactDirection.y, y: impactDirection.x };
+  dirX += tangent.x * offset * paddleAimInfluence;
+  dirY += tangent.y * offset * paddleAimInfluence;
+
+  // Garantit une vraie composante vers l'intérieur (anti-rasage du bord, plus de rebonds en chaîne).
+  const inwardDot = dirX * inwardX + dirY * inwardY;
+  if (inwardDot < 0.45) {
+    dirX += inwardX * (0.45 - inwardDot);
+    dirY += inwardY * (0.45 - inwardDot);
   }
 
-  game.ballDirX = aimedX;
-  game.ballDirY = aimedY;
+  const length = Math.hypot(dirX, dirY) || 1;
+  game.ballDirX = dirX / length;
+  game.ballDirY = dirY / length;
   game.ballX = impactDirection.x * (arenaRadius - 0.12);
   game.ballY = impactDirection.y * (arenaRadius - 0.12);
 }
@@ -850,6 +913,8 @@ function resetBall() {
   const direction = angleToDirection(angle);
   game.ballDirX = direction.x;
   game.ballDirY = direction.y;
+  game.ballSpeedMul = 1;
+  game.ballDeadly = false;
 }
 
 
@@ -877,6 +942,8 @@ function buildSnapshot(client, full = true) {
     ballY: round(game.ballY),
     ballDirX: round(game.ballDirX),
     ballDirY: round(game.ballDirY),
+    ballSpeed: round(ballSpeed * game.ballSpeedMul),
+    ballDeadly: game.ballDeadly,
     players: game.players.map((player) => {
       const owner = clientForPlayerId(player.id);
       return {

@@ -1,21 +1,24 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
 using System.Threading;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.InputSystem.Controls;
 
 public class PongCircleUdpClient : MonoBehaviour
 {
     public PongCircleGame CircleGame;
+#if UNITY_EDITOR
+    public string ServerHost = "127.0.0.1";
+#else
     public string ServerHost = "pong.becop.fr";
+#endif
     public int ServerPort = 41234;
     public bool AutoConnect = true;
     public float InputSendRate = 30;
+    public bool DebugNetworkLogging = false;
 
     public bool IsConnected {
       get { return connected; }
@@ -91,6 +94,7 @@ public class PongCircleUdpClient : MonoBehaviour
     float nextInputSendTime;
     float nextJoinRetryTime;
     float joinRetryEndTime;
+    float lastSnapshotTime;
     float onScreenDirection;
     float onScreenDirectionTime;
     float lastSentDirection = 999f;
@@ -98,6 +102,7 @@ public class PongCircleUdpClient : MonoBehaviour
 
     void Awake() {
       EnsureCircleGame();
+      ApplyEditorDefaultHost();
       ApplyLauncherEnvironment();
       deviceId = LoadOrCreateDeviceId();
       deviceName = DetectDeviceName();
@@ -122,6 +127,10 @@ public class PongCircleUdpClient : MonoBehaviour
       }
 
       RetryJoinIfNeeded();
+
+      if (joinRetryEndTime > 0 && localPlayerId <= 0 && Time.unscaledTime - lastSnapshotTime > 3f) {
+        lastStatus = "UDP waiting for server response";
+      }
 
       if (localPlayerId <= 0) {
         return;
@@ -165,12 +174,25 @@ public class PongCircleUdpClient : MonoBehaviour
           return;
         }
 
-        serverEndPoint = new IPEndPoint(addresses[0], ServerPort);
-        udp = new UdpClient();
-        udp.Connect(serverEndPoint);
+        IPAddress serverAddress = null;
+        for (int i = 0; i < addresses.Length; i++) {
+          if (addresses[i].AddressFamily == AddressFamily.InterNetwork) {
+            serverAddress = addresses[i];
+            break;
+          }
+        }
+
+        if (serverAddress == null) {
+          lastStatus = "UDP DNS IPv4 failed";
+          return;
+        }
+
+        serverEndPoint = new IPEndPoint(serverAddress, ServerPort);
+        udp = new UdpClient(new IPEndPoint(IPAddress.Any, 0));
         stopping = false;
         connected = true;
-        lastStatus = "UDP connected";
+        lastStatus = "UDP connected to " + ServerHost + ":" + ServerPort;
+        LogNetwork("Connected endpoint " + serverEndPoint + " from " + udp.Client.LocalEndPoint);
 
         if (CircleGame != null) {
           CircleGame.SetNetworkControlled(true);
@@ -205,20 +227,21 @@ public class PongCircleUdpClient : MonoBehaviour
     public void SendStartGame() {
       joinRetryEndTime = Time.unscaledTime + 10f;
       nextJoinRetryTime = 0;
-      lastStatus = "UDP join request sent";
+      lastSnapshotTime = Time.unscaledTime;
+      lastStatus = "UDP join sent to " + ServerHost + ":" + ServerPort;
       SendJoin();
     }
 
     public void SendRestartLobby() {
-      SendMessage("{\"type\":\"restart\"}");
+      SendMessage(PongCircleUdpProtocol.Simple("restart"));
     }
 
     public void SendReplayVote() {
-      SendMessage("{\"type\":\"replay\"}");
+      SendMessage(PongCircleUdpProtocol.Simple("replay"));
     }
 
     public void SendReturnLobby() {
-      SendMessage("{\"type\":\"lobby\"}");
+      SendMessage(PongCircleUdpProtocol.Simple("lobby"));
     }
 
     // Identité choisie par l'utilisateur, propagée au serveur
@@ -250,9 +273,10 @@ public class PongCircleUdpClient : MonoBehaviour
           lock (receivedMessagesLock) {
             receivedMessages.Enqueue(message);
           }
-        } catch {
+        } catch (Exception exception) {
           if (!stopping) {
             connected = false;
+            lastStatus = "UDP receive failed: " + exception.Message;
           }
           return;
         }
@@ -275,6 +299,7 @@ public class PongCircleUdpClient : MonoBehaviour
           return;
         }
 
+        LogNetwork("Received " + message);
         HandleMessage(message);
       }
     }
@@ -290,6 +315,7 @@ public class PongCircleUdpClient : MonoBehaviour
       }
 
       localPlayerId = snapshot.localPlayerId;
+      lastSnapshotTime = Time.unscaledTime;
       lobbyOpen = snapshot.lobbyOpen;
       connectedPlayerCount = snapshot.connectedPlayerCount;
       readyPlayerCount = snapshot.readyPlayerCount;
@@ -333,18 +359,18 @@ public class PongCircleUdpClient : MonoBehaviour
     }
 
     void SendHello() {
-      SendMessage("{\"type\":\"hello\",\"deviceId\":\"" + Escape(deviceId) + "\",\"deviceName\":\"" + Escape(deviceName) + "\"}");
+      SendMessage(PongCircleUdpProtocol.Hello(deviceId, deviceName));
     }
 
     void SendJoin() {
-      SendMessage("{\"type\":\"join\"}");
+      SendMessage(PongCircleUdpProtocol.Simple("join"));
     }
 
     void SendInput(float direction) {
-      SendMessage("{\"type\":\"input\",\"direction\":" + direction.ToString("0.###", CultureInfo.InvariantCulture) + "}");
+      SendMessage(PongCircleUdpProtocol.Input(direction));
     }
 
-    void SendMessage(string json) {
+    void SendMessage(PongCircleUdpPayload payload) {
       if (udp == null) {
         Connect();
       }
@@ -353,14 +379,31 @@ public class PongCircleUdpClient : MonoBehaviour
         return;
       }
 
-      string wrapped = "{\"seq\":" + (++sequence) + ",\"deviceId\":\"" + Escape(deviceId) + "\",\"deviceName\":\"" + Escape(deviceName) + "\",\"displayName\":\"" + Escape(chosenDisplayName) + "\",\"color\":\"" + Escape(chosenColorHex) + "\",\"payload\":" + json + "}";
+      string wrapped = PongCircleUdpProtocol.BuildMessage(
+        ++sequence,
+        deviceId,
+        deviceName,
+        chosenDisplayName,
+        chosenColorHex,
+        payload);
       byte[] data = Encoding.UTF8.GetBytes(wrapped);
       try {
-        udp.Send(data, data.Length);
+        LogNetwork("Sending " + data.Length + " bytes to " + serverEndPoint + " " + wrapped);
+        int sent = udp.Send(data, data.Length, serverEndPoint);
+        LogNetwork("Sent " + sent + " bytes from " + udp.Client.LocalEndPoint);
       } catch (Exception exception) {
         connected = false;
         lastStatus = "UDP send failed: " + exception.Message;
+        Debug.LogWarning(lastStatus);
       }
+    }
+
+    void LogNetwork(string message) {
+      if (!DebugNetworkLogging) {
+        return;
+      }
+
+      Debug.Log("[Pong UDP] " + message);
     }
 
     void EnsureCircleGame() {
@@ -386,35 +429,21 @@ public class PongCircleUdpClient : MonoBehaviour
       }
     }
 
+    void ApplyEditorDefaultHost() {
+#if UNITY_EDITOR
+      string launcherHost = Environment.GetEnvironmentVariable("PONG_UDP_HOST");
+      if (string.IsNullOrEmpty(launcherHost) && ServerHost == "pong.becop.fr") {
+        ServerHost = "127.0.0.1";
+      }
+#endif
+    }
+
     float ReadLocalDirection() {
       if (Time.unscaledTime - onScreenDirectionTime < 0.2f) {
         return onScreenDirection;
       }
 
-      Keyboard keyboard = Keyboard.current;
-      if (keyboard == null) {
-        return 0;
-      }
-
-      float arrowDirection = ReadPair(keyboard.upArrowKey, null, keyboard.downArrowKey);
-      if (Mathf.Abs(arrowDirection) > 0) {
-        return arrowDirection;
-      }
-
-      return ReadPair(keyboard.zKey, keyboard.wKey, keyboard.sKey);
-    }
-
-    float ReadPair(KeyControl positive, KeyControl alternativePositive, KeyControl negative) {
-      float direction = 0;
-      if ((positive != null && positive.isPressed) || (alternativePositive != null && alternativePositive.isPressed)) {
-        direction += 1;
-      }
-
-      if (negative != null && negative.isPressed) {
-        direction -= 1;
-      }
-
-      return Mathf.Clamp(direction, -1, 1);
+      return PongCircleKeyboardInput.ReadNetworkDirection();
     }
 
     string LoadOrCreateDeviceId() {
@@ -449,7 +478,4 @@ public class PongCircleUdpClient : MonoBehaviour
       return name;
     }
 
-    string Escape(string value) {
-      return (value ?? "").Replace("\\", "\\\\").Replace("\"", "\\\"");
-    }
 }

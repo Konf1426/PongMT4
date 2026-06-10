@@ -5,9 +5,11 @@ public class PongCircleNetworkSnapshot
 {
     public string type;
     public int localPlayerId;
+    public bool localIsSpectator;
     public bool lobbyOpen;
     public int connectedPlayerCount;
     public int readyPlayerCount;
+    public int spectatorCount;
     public int playerCount;
     public int alivePlayerCount;
     public int winnerId;
@@ -32,6 +34,7 @@ public class PongCircleNetworkDeviceState
     public int playerId;
     public string name;
     public bool ready;
+    public bool spectator;
     public string color;
     public int lives;
     public int points;

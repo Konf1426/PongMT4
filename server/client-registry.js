@@ -22,6 +22,7 @@ function createClientRegistry(options) {
         port: remote.port,
         playerId: 0,
         ready: false,
+        spectator: false,
         input: 0,
         wantsReplay: false,
         lastSeen: Date.now()
@@ -69,7 +70,7 @@ function createClientRegistry(options) {
   function isColorTakenByOther(color, self) {
     const target = color.toLowerCase();
     for (const client of getConnectedClients()) {
-      if (client !== self && client.color && client.color.toLowerCase() === target) {
+      if (client !== self && !client.spectator && client.color && client.color.toLowerCase() === target) {
         return true;
       }
     }
@@ -89,7 +90,11 @@ function createClientRegistry(options) {
   }
 
   function getReadyClients() {
-    return getConnectedClients().filter((client) => client.ready).slice(0, maximumPlayers);
+    return getConnectedClients().filter((client) => client.ready && !client.spectator).slice(0, maximumPlayers);
+  }
+
+  function countSpectators() {
+    return getConnectedClients().filter((client) => client.spectator).length;
   }
 
   function cleanupClients() {
@@ -118,6 +123,7 @@ function createClientRegistry(options) {
     cleanupClients,
     getConnectedClients,
     getReadyClients,
+    countSpectators,
     isColorTakenByOther,
     registerClient,
     sanitizeColor,

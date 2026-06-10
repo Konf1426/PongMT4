@@ -7,6 +7,7 @@ function createSnapshotBuilder(options) {
     clientLabel,
     countInGameDevices,
     countReadyDevices,
+    countSpectators,
     game,
     maximumPlayers,
     minimumPlayers,
@@ -18,10 +19,12 @@ function createSnapshotBuilder(options) {
     const alivePlayerCount = game.players.filter((player) => player.alive).length;
     const snapshot = {
       type: "state",
-      localPlayerId: client ? client.playerId : 0,
+      localPlayerId: client && !client.spectator ? client.playerId : 0,
+      localIsSpectator: !!(client && client.spectator),
       lobbyOpen: game.lobbyOpen,
       connectedPlayerCount: countInGameDevices(),
       readyPlayerCount: countReadyDevices(),
+      spectatorCount: countSpectators(),
       playerCount: Math.max(minimumPlayers, Math.min(maximumPlayers, game.players.length)),
       alivePlayerCount,
       winnerId: game.winnerId,
@@ -66,7 +69,7 @@ function createSnapshotBuilder(options) {
       .map((d) => d.playerId + ":" + d.name + ":" + d.ready + ":" + d.color + ":" + d.lives + ":" + d.points)
       .join("|");
     const lobby = buildLobbyDeviceList()
-      .map((d) => d.name + ":" + d.color)
+      .map((d) => d.name + ":" + d.color + ":" + d.spectator)
       .join("|");
     const identities = game.players
       .map((player) => {
@@ -88,6 +91,7 @@ function createSnapshotBuilder(options) {
           playerId: client.playerId,
           name: clientLabel(client),
           ready: client.ready,
+          spectator: false,
           color: client.color,
           lives: player ? player.lives : 0,
           points: scoreStore.pointsForDevice(client.deviceId)
@@ -103,6 +107,7 @@ function createSnapshotBuilder(options) {
         playerId: 0,
         name: clientLabel(client),
         ready: false,
+        spectator: !!client.spectator,
         color: client.color
       }));
   }

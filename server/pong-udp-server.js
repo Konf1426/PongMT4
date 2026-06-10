@@ -70,6 +70,7 @@ const snapshots = createSnapshotBuilder({
   clientLabel: clients.clientLabel,
   countInGameDevices,
   countReadyDevices,
+  countSpectators: clients.countSpectators,
   game,
   maximumPlayers,
   minimumPlayers,
@@ -142,7 +143,16 @@ socket.on("message", (buffer, remote) => {
     return;
   }
 
+  if (payload.type === "spectate") {
+    spectateGame(client);
+    broadcastSnapshot();
+    return;
+  }
+
   if (payload.type === "input") {
+    if (client.spectator || client.playerId <= 0) {
+      return;
+    }
     client.input = circleMath.clamp(Number(payload.direction) || 0, -1, 1);
     client.lastSeen = Date.now();
     return;
@@ -190,6 +200,7 @@ http.createServer((req, res) => {
     udpPort: UDP_PORT,
     connectedPlayerCount: game.connectedPlayerCount,
     readyPlayerCount: game.readyPlayerCount,
+    spectatorCount: clients.countSpectators(),
     playerCount: game.playerCount,
     lobbyOpen: game.lobbyOpen,
     gameStarted: game.gameStarted,
@@ -213,6 +224,7 @@ function joinGame(client) {
   }
 
   client.ready = true;
+  client.spectator = false;
 
   if (game.gameStarted && !game.gameOver) {
     addReadyPlayerToRunningGame(client);
@@ -226,6 +238,25 @@ function joinGame(client) {
   game.postGameDeadline = 0;
   game.winnerId = 0;
   assignLobbyPlayers();
+}
+
+function spectateGame(client) {
+  if (!client) {
+    return;
+  }
+
+  client.ready = false;
+  client.spectator = true;
+  client.input = 0;
+  client.wantsReplay = false;
+  client.playerId = 0;
+
+  if (!game.gameStarted && !game.gameOver) {
+    assignLobbyPlayers();
+    return;
+  }
+
+  updateStatus();
 }
 
 function addReadyPlayerToRunningGame() {
@@ -250,11 +281,13 @@ function addReadyPlayerToRunningGame() {
 function resetToLobby(requestingClient) {
   for (const client of clientsByDevice.values()) {
     client.ready = false;
+    client.spectator = false;
     client.input = 0;
   }
 
   if (requestingClient) {
     requestingClient.ready = true;
+    requestingClient.spectator = false;
   }
 
   game.lobbyOpen = true;
@@ -269,6 +302,7 @@ function resetToLobby(requestingClient) {
 function returnToLobby() {
   for (const client of clientsByDevice.values()) {
     client.ready = false;
+    client.spectator = false;
     client.input = 0;
     client.wantsReplay = false;
     client.playerId = 0;

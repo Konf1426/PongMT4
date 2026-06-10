@@ -63,6 +63,11 @@ public class PongCircleGame : MonoBehaviour
       }
     }
 
+    public bool RaceActive { get { return raceActive; } }
+    public int RaceWinnerId { get { return raceWinnerId; } }
+    public string RaceWinnerName { get { return raceWinnerName; } }
+    public int RaceRemainingMs { get { return raceRemainingMs; } }
+
     public bool IsGameStarted {
       get {
         return gameStarted;
@@ -89,6 +94,10 @@ public class PongCircleGame : MonoBehaviour
     float countdownRemaining;
     int winnerId;
     string status = "Playing";
+    bool raceActive;
+    int raceWinnerId;
+    string raceWinnerName = "";
+    int raceRemainingMs;
 
     // État réseau pour l'interpolation/prédiction (Update les consomme entre 2 snapshots).
     int networkLocalPlayerId;
@@ -400,6 +409,10 @@ public class PongCircleGame : MonoBehaviour
       gameStarted = snapshot.gameStarted;
       gameOver = snapshot.gameOver;
       winnerId = snapshot.winnerId;
+      raceActive = snapshot.raceActive;
+      raceWinnerId = snapshot.raceWinnerId;
+      raceWinnerName = snapshot.raceWinnerName ?? "";
+      raceRemainingMs = snapshot.raceRemainingMs;
       if (!string.IsNullOrEmpty(snapshot.status)) {
         status = snapshot.status;
       }

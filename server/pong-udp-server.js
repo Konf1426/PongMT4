@@ -23,8 +23,12 @@ const startCountdownMaxMs = 15000;
 
 const startingLives = 3;
 
-const survivalPoints = 1;          
-const winBonusPoints = 3;           
+const survivalPoints = 1;
+const winBonusPoints = 3;
+const raceBonusPoints = 2;
+const raceIntervalMs = 20000;
+const raceDurationMs = 5000;
+const raceWinnerDisplayMs = 3000;
 const scoresFilePath = path.join(__dirname, "scores.json");
 
 const socket = dgram.createSocket("udp4");
@@ -48,7 +52,15 @@ const game = {
   startDeadline: 0,
   countdownPlayerCount: 0,
   winnerId: 0,
-  status: "Waiting for someone to start a game"
+  status: "Waiting for someone to start a game",
+  race: {
+    active: false,
+    deadline: 0,
+    winnerId: 0,
+    winnerName: "",
+    winnerDisplayDeadline: 0,
+    nextRaceTime: 0
+  }
 };
 
 let nextClientId = 1;
@@ -196,6 +208,12 @@ socket.on("message", (buffer, remote) => {
 
   if (payload.type === "lobby") {
     returnToLobby();
+    broadcastSnapshot();
+    return;
+  }
+
+  if (payload.type === "race") {
+    handleRaceAction(client);
     broadcastSnapshot();
   }
 });
@@ -503,6 +521,58 @@ function voteReplay(client) {
   updatePostGameStatus();
 }
 
+function updateRace(now) {
+  const race = game.race;
+  if (!game.gameStarted || game.gameOver) {
+    race.active = false;
+    race.winnerId = 0;
+    race.winnerName = "";
+    race.nextRaceTime = 0;
+    race.winnerDisplayDeadline = 0;
+    return;
+  }
+
+  if (race.winnerId > 0) {
+    if (now >= race.winnerDisplayDeadline) {
+      race.winnerId = 0;
+      race.winnerName = "";
+      race.nextRaceTime = now + raceIntervalMs;
+    }
+    return;
+  }
+
+  if (race.nextRaceTime === 0) {
+    race.nextRaceTime = now + raceIntervalMs;
+    return;
+  }
+
+  if (!race.active && now >= race.nextRaceTime) {
+    race.active = true;
+    race.deadline = now + raceDurationMs;
+    return;
+  }
+
+  if (race.active && now >= race.deadline) {
+    race.active = false;
+    race.nextRaceTime = now + raceIntervalMs;
+  }
+}
+
+function handleRaceAction(client) {
+  const race = game.race;
+  if (!race.active || race.winnerId > 0) return;
+  const player = game.players.find((p) => clientForPlayerId(p.id) === client);
+  if (!player?.alive) return;
+
+  race.active = false;
+  race.winnerId = player.id;
+  race.winnerName = clientLabel(client);
+  race.winnerDisplayDeadline = Date.now() + raceWinnerDisplayMs;
+  race.nextRaceTime = race.winnerDisplayDeadline + raceIntervalMs;
+  awardPoints(player, raceBonusPoints);
+  flushScores();
+}
+
 function tick() {
   const now = Date.now();
   const deltaTime = Math.min(0.05, (now - lastTick) / 1000);
@@ -515,6 +585,7 @@ function tick() {
   updatePostGameTimeout();
   updatePaddles(deltaTime);
   updateBall(deltaTime);
+  updateRace(now);
 }
 
 
@@ -877,6 +948,10 @@ function buildSnapshot(client, full = true) {
     ballY: round(game.ballY),
     ballDirX: round(game.ballDirX),
     ballDirY: round(game.ballDirY),
+    raceActive: game.race.active,
+    raceWinnerId: game.race.winnerId,
+    raceWinnerName: game.race.winnerName,
+    raceRemainingMs: game.race.active ? Math.max(0, game.race.deadline - Date.now()) : 0,
     players: game.players.map((player) => {
       const owner = clientForPlayerId(player.id);
       return {

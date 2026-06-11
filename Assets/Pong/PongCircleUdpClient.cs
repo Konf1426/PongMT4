@@ -149,7 +149,7 @@ public class PongCircleUdpClient : MonoBehaviour
         return;
       }
 
-      if (Keyboard.current != null && (Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.numpadEnterKey.wasPressedThisFrame)) {
+      if (Keyboard.current != null && (Keyboard.current.leftShiftKey.wasPressedThisFrame || Keyboard.current.rightShiftKey.wasPressedThisFrame)) {
         SendMessage(PongCircleUdpProtocol.Simple("race"));
       }
 

@@ -445,7 +445,10 @@ public class PongCircleGame : MonoBehaviour
           if (!string.IsNullOrEmpty(playerState.color)
               && ColorUtility.TryParseHtmlString("#" + playerState.color, out Color parsedColor)) {
             parsedColor.a = SectorAlpha;
-            player.Color = parsedColor;
+            if (parsedColor != player.Color) {
+              player.Color = parsedColor;
+              ApplyPlayerColor(player);
+            }
           }
         }
       }

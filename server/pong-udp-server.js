@@ -32,7 +32,6 @@ const startingLives = 3;
 
 const survivalPoints = 1;
 const winBonusPoints = 3;
-const raceBonusPoints = 2;
 const raceIntervalMs = 20000;
 const raceDurationMs = 5000;
 const raceWinnerDisplayMs = 3000;
@@ -576,6 +575,11 @@ function voteReplay(client) {
 
   client.wantsReplay = true;
   game.replayVoteCount = countReplayVotes();
+  if (game.replayVoteCount >= minimumPlayers) {
+    beginMatch();
+    return;
+  }
+
   updatePostGameStatus();
 }
 
@@ -627,8 +631,8 @@ function handleRaceAction(client) {
   race.winnerName = clientLabel(client);
   race.winnerDisplayDeadline = Date.now() + raceWinnerDisplayMs;
   race.nextRaceTime = race.winnerDisplayDeadline + raceIntervalMs;
-  awardPoints(player, raceBonusPoints);
-  flushScores();
+  player.lives += 1;
+  game.status = `${race.winnerName} wins the race and gains 1 life`;
 }
 
 function tick() {
@@ -739,13 +743,15 @@ function updatePostGameTimeout() {
     return;
   }
 
+  game.replayVoteCount = countReplayVotes();
+  if (game.replayVoteCount >= minimumPlayers) {
+    beginMatch();
+    broadcastSnapshot();
+    return;
+  }
+
   if (Date.now() >= game.postGameDeadline) {
-    game.replayVoteCount = countReplayVotes();
-    if (game.replayVoteCount >= minimumPlayers) {
-      beginMatch();
-    } else {
-      returnToLobby();
-    }
+    returnToLobby();
     broadcastSnapshot();
   } else {
     updatePostGameStatus();

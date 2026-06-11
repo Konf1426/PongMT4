@@ -111,6 +111,21 @@
     -unity-font-style: bold;
 }
 
+.local-stats {
+    font-size: 20px;
+    -unity-font-style: bold;
+    color: rgb(13, 17, 23);
+    background-color: rgb(88, 230, 200);
+    border-radius: 8px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    padding-left: 10px;
+    padding-right: 10px;
+    margin-top: 4px;
+    margin-bottom: 10px;
+    -unity-text-align: middle-center;
+}
+
 .hint {
     font-size: 16px;
     color: rgb(160, 175, 188);
@@ -231,6 +246,36 @@
 }
 
 /* Contrôles tactiles */
+.controls-help {
+    display: none;
+    position: absolute;
+    right: 18px;
+    bottom: 18px;
+    width: 260px;
+    background-color: rgba(11, 15, 20, 0.84);
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: rgba(88, 230, 200, 0.28);
+    padding-top: 12px;
+    padding-bottom: 12px;
+    padding-left: 14px;
+    padding-right: 14px;
+}
+
+.controls-title {
+    font-size: 15px;
+    -unity-font-style: bold;
+    color: rgb(88, 230, 200);
+    margin-bottom: 6px;
+}
+
+.controls-line {
+    font-size: 13px;
+    color: rgb(205, 218, 228);
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
 .mobile-bar {
     display: none;
     position: absolute;

@@ -13,7 +13,7 @@ public class PongCircleHud : MonoBehaviour
     bool bound;
 
     // Panels
-    VisualElement panelJoin, panelLobby, panelHud, panelWin, panelEliminated, mobileControls;
+    VisualElement panelJoin, panelLobby, panelHud, panelWin, panelEliminated, mobileControls, controlsHelp;
 
     // Join panel
     Button btnJoin, btnSpectate;
@@ -28,7 +28,7 @@ public class PongCircleHud : MonoBehaviour
 
     // In-game HUD panel
     Button btnRestart;
-    Label hudPlayers, hudAlive, hudStatus, hudNetwork, hudRace;
+    Label hudLocalStats, hudPlayers, hudAlive, hudStatus, hudNetwork, hudRace;
     VisualElement hudDevices, hudLobbyDevices;
 
     // Win panel
@@ -71,6 +71,7 @@ public class PongCircleHud : MonoBehaviour
         panelWin = root.Q<VisualElement>("panel-win");
         panelEliminated = root.Q<VisualElement>("panel-eliminated");
         mobileControls = root.Q<VisualElement>("mobile-controls");
+        controlsHelp = root.Q<VisualElement>("controls-help");
 
         // Join
         joinTitle = root.Q<Label>("join-title");
@@ -124,6 +125,7 @@ public class PongCircleHud : MonoBehaviour
         if (lobbyMouse != null) lobbyMouse.RegisterValueChangedCallback(e => { if (Game != null) Game.MouseControlEnabled = e.newValue; });
 
         // HUD
+        hudLocalStats = root.Q<Label>("hud-local-stats");
         hudPlayers = root.Q<Label>("hud-players");
         hudAlive = root.Q<Label>("hud-alive");
         hudStatus = root.Q<Label>("hud-status");
@@ -217,6 +219,7 @@ public class PongCircleHud : MonoBehaviour
         Show(panelEliminated, showEliminated);
         Show(panelLobby, showLobby);
         Show(panelHud, showHud);
+        Show(controlsHelp, showLobby || showHud || showWin || showEliminated);
 
         bool showMobile = showHud && network && localId > 0 && ShouldShowMobileControls();
         Show(mobileControls, showMobile);
@@ -232,20 +235,21 @@ public class PongCircleHud : MonoBehaviour
     void RefreshJoin(int localId)
     {
         int countdown = StartCountdownSeconds();
-        bool counting = countdown > 0;
+        bool joinedPlayer = localId > 0;
+        bool showCountdown = joinedPlayer && countdown > 0;
 
-        Show(joinTitle, !counting);
-        Show(joinSubtitle, !counting);
-        Show(joinIdentity, !counting);
-        Show(btnJoin, !counting);
-        Show(joinNetwork, !counting);
-        Show(joinPlayers, !counting);
-        Show(joinHint, !counting);
-        Show(joinYourPlayer, !counting && localId > 0);
-        Show(joinMin, !counting && !Game.IsGameStarted);
-        Show(joinCountdown, counting);
+        Show(joinTitle, !showCountdown);
+        Show(joinSubtitle, !showCountdown);
+        Show(joinIdentity, !showCountdown);
+        Show(btnJoin, !showCountdown);
+        Show(joinNetwork, !showCountdown);
+        Show(joinPlayers, !showCountdown);
+        Show(joinHint, !showCountdown);
+        Show(joinYourPlayer, !showCountdown && joinedPlayer);
+        Show(joinMin, !showCountdown && !Game.IsGameStarted);
+        Show(joinCountdown, showCountdown);
 
-        if (counting)
+        if (showCountdown)
         {
             SetText(joinCountdown, countdown.ToString());
             joinCountdown.style.fontSize = 96;
@@ -254,13 +258,13 @@ public class PongCircleHud : MonoBehaviour
         }
 
         SetText(btnJoin, Game.IsGameStarted ? "Rejoindre la partie" : "Jouer / Rejoindre");
-        Show(btnSpectate, ShouldUseNetwork() && Game.IsGameStarted && localId <= 0 && !IsSpectator());
+        Show(btnSpectate, ShouldUseNetwork() && Game.IsGameStarted && !joinedPlayer && !IsSpectator());
         SetText(joinNetwork, "Réseau : " + NetworkStatus());
         SetText(joinPlayers, "Joueurs : " + ConnectedPlayerCount() + " / " + Game.MaximumPlayers + "   Spectateurs : " + SpectatorCount());
         SetText(joinMin, "Minimum pour lancer : " + Game.MinimumPlayers);
-        if (localId > 0) SetText(joinYourPlayer, "Votre joueur : " + localId);
+        if (joinedPlayer) SetText(joinYourPlayer, "Votre joueur : " + localId);
 
-        SetText(joinHint, localId > 0
+        SetText(joinHint, joinedPlayer
             ? "La partie se lance quand assez de joueurs ont rejoint."
             : (Game.IsGameStarted ? "Choisis joueur pour entrer dans la partie, ou spectateur pour regarder." : "Tu es dans le menu tant que tu n'as pas rejoint la partie."));
 
@@ -401,6 +405,7 @@ public class PongCircleHud : MonoBehaviour
 
     void RefreshHud(bool network)
     {
+        RefreshLocalStats(network);
         SetText(hudPlayers, "Joueurs : " + Game.CurrentPlayerCount);
         SetText(hudAlive, "En vie : " + Game.AlivePlayerCount);
         SetText(hudStatus, "Statut : " + Game.Status);
@@ -413,6 +418,24 @@ public class PongCircleHud : MonoBehaviour
         RefreshRace();
     }
 
+    void RefreshLocalStats(bool network)
+    {
+        int localId = LocalPlayerId();
+        bool showStats = network && localId > 0 && !IsSpectator();
+        Show(hudLocalStats, showStats);
+        if (!showStats) return;
+
+        PongCircleNetworkDeviceState local = FindDeviceByPlayerId(localId);
+        if (local != null)
+        {
+            SetText(hudLocalStats, "P" + localId + "   Vies : " + local.lives + "   Points : " + local.points);
+        }
+        else
+        {
+            SetText(hudLocalStats, "P" + localId + "   Vies : -   Points : -");
+        }
+    }
+
     void RefreshRace()
     {
         if (hudRace == null || Game == null) return;
@@ -420,12 +443,12 @@ public class PongCircleHud : MonoBehaviour
         if (Game.RaceActive)
         {
             int secs = Mathf.CeilToInt(Game.RaceRemainingMs / 1000f);
-            hudRace.text = "COURSE ! Appuie sur ESPACE ! (" + secs + "s)";
+            hudRace.text = "COURSE ! Appuie sur ENTREE ! (" + secs + "s)";
             hudRace.visible = true;
         }
         else if (Game.RaceWinnerId > 0)
         {
-            hudRace.text = Game.RaceWinnerName + " remporte la course ! +2 pts";
+            hudRace.text = Game.RaceWinnerName + " remporte la course ! +1 vie";
             hudRace.visible = true;
         }
         else
@@ -550,6 +573,17 @@ public class PongCircleHud : MonoBehaviour
             if (d == null) continue;
             container.Add(MakeListLabel(d.name + (d.spectator ? " (spectateur)" : " (pas en jeu)"), false));
         }
+    }
+
+    PongCircleNetworkDeviceState FindDeviceByPlayerId(int playerId)
+    {
+        PongCircleNetworkDeviceState[] devices = NetworkDevices();
+        if (devices == null) return null;
+        foreach (PongCircleNetworkDeviceState d in devices)
+        {
+            if (d != null && d.playerId == playerId) return d;
+        }
+        return null;
     }
 
     static string DeviceSignature(PongCircleNetworkDeviceState[] devices, bool lobby)

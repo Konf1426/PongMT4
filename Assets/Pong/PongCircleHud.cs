@@ -443,7 +443,7 @@ public class PongCircleHud : MonoBehaviour
         if (Game.RaceActive)
         {
             int secs = Mathf.CeilToInt(Game.RaceRemainingMs / 1000f);
-            hudRace.text = "COURSE ! Appuie sur ENTREE ! (" + secs + "s)";
+            hudRace.text = "COURSE ! Appuie sur SHIFT ! (" + secs + "s)";
             hudRace.visible = true;
         }
         else if (Game.RaceWinnerId > 0)

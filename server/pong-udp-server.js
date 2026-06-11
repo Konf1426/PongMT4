@@ -235,7 +235,7 @@ socket.on("message", (buffer, remote) => {
   }
 
   if (payload.type === "lobby") {
-    returnToLobby();
+    leaveGameForClient(client);
     broadcastSnapshot();
     return;
   }
@@ -463,6 +463,24 @@ function returnToLobby() {
   game.postGameDeadline = 0;
   game.winnerId = 0;
   assignLobbyPlayers();
+}
+
+function leaveGameForClient(client) {
+  client.ready = false;
+  client.spectator = false;
+  client.input = 0;
+  client.wantsReplay = false;
+  client.playerId = 0;
+
+  if (getReadyClients().length === 0) {
+    game.lobbyOpen = false;
+    game.gameStarted = false;
+    game.gameOver = false;
+    game.replayVoteCount = 0;
+    game.postGameDeadline = 0;
+    game.winnerId = 0;
+  }
+  updateStatus();
 }
 
 function assignLobbyPlayers() {

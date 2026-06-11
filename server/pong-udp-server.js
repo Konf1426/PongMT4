@@ -1134,7 +1134,6 @@ function buildDeviceList() {
     .sort((a, b) => a.playerId - b.playerId)
     .map((client) => {
       const player = game.players[client.playerId - 1];
-      const entry = scoreboard.get(client.deviceId);
       return {
         playerId: client.playerId,
         name: clientLabel(client),
@@ -1142,7 +1141,7 @@ function buildDeviceList() {
         spectator: false,
         color: client.color,
         lives: player ? player.lives : 0,
-        points: entry ? entry.points : 0
+        points: player ? player.gamePoints || 0 : 0
       };
     });
 }

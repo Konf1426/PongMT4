@@ -30,8 +30,6 @@ const startCountdownMaxMs = 15000;
 
 const startingLives = 3;
 
-const survivalPoints = 1;
-const winBonusPoints = 3;
 const raceIntervalMs = 20000;
 const raceDurationMs = 5000;
 const raceWinnerDisplayMs = 3000;
@@ -524,6 +522,7 @@ function beginMatch() {
     player.alive = true;
     player.hasPaddleAngle = false;
     player.lives = startingLives;
+    player.gamePoints = 0;
   }
 
   for (const client of clientsByDevice.values()) {
@@ -578,6 +577,7 @@ function rebuildPlayersForReadyClients(readyClients, preserveExistingPlayers) {
       alive: true,
       hasPaddleAngle: false,
       lives: startingLives,
+      gamePoints: 0,
       paddleAngle: 0,
       input: 0,
       sectorStartAngle: 0,
@@ -649,8 +649,8 @@ function handleRaceAction(client) {
   race.winnerName = clientLabel(client);
   race.winnerDisplayDeadline = Date.now() + raceWinnerDisplayMs;
   race.nextRaceTime = race.winnerDisplayDeadline + raceIntervalMs;
-  player.lives += 1;
-  game.status = `${race.winnerName} wins the race and gains 1 life`;
+  player.gamePoints = (player.gamePoints || 0) + 2;
+  game.status = `${race.winnerName} remporte la course ! +2 pts`;
 }
 
 function tick() {
@@ -835,6 +835,7 @@ function updateBall(deltaTime) {
       concedeGoal(defender);
     } else {
       game.status = `Player ${defender.id} dodged the deadly ball!`;
+      defender.gamePoints = (defender.gamePoints || 0) + 2;
       resetBall();
     }
     return;
@@ -848,6 +849,7 @@ function updateBall(deltaTime) {
       owner.smashArmedUntil = 0;
       owner.smashCooldownUntil = now + smashCooldownMs;
       game.status = `Player ${defender.id} SMASH!`;
+      defender.gamePoints = (defender.gamePoints || 0) + 3;
     } else {
       game.ballSpeedMul = 1;
     }
@@ -926,6 +928,7 @@ function countReplayVotes() {
 }
 
 function bounceOnPaddle(defender, impactAngle) {
+  defender.gamePoints = (defender.gamePoints || 0) + 1;
   const impactDirection = angleToDirection(impactAngle); // radial sortant au point d'impact
   const inwardX = -impactDirection.x;
   const inwardY = -impactDirection.y;
@@ -959,20 +962,12 @@ function bounceOnPaddle(defender, impactAngle) {
 function eliminatePlayer(player) {
   player.alive = false;
 
-  // Score de survie 
-  for (const survivor of game.players) {
-    if (survivor.alive) {
-      awardPoints(survivor, survivalPoints);
-    }
-  }
-
   const alivePlayers = game.players.filter((candidate) => candidate.alive);
 
   if (alivePlayers.length <= 1) {
     const winner = alivePlayers[0] || null;
     game.winnerId = winner ? winner.id : 0;
     if (winner) {
-      awardPoints(winner, winBonusPoints);
       const owner = clientForPlayerId(winner.id);
       if (owner) {
         getScoreEntry(owner.deviceId, clientLabel(owner)).wins += 1;
@@ -1089,7 +1084,7 @@ function buildSnapshot(client, full = true) {
         id: player.id,
         alive: player.alive,
         lives: player.lives,
-        points: pointsForPlayer(player),
+        points: player.gamePoints || 0,
         paddleAngle: round(player.paddleAngle),
         input: round(player.input || 0),
         name: full && owner ? clientLabel(owner) : "",

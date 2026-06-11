@@ -33,7 +33,7 @@ public class PongCircleHud : MonoBehaviour
 
     // Win panel
     Button btnReplay, btnReturn;
-    Label winTitle, winSubtitle, winVotes, winCountdown;
+    Label winTitle, winSubtitle, winVotes, winCountdown, winScores;
 
     // Mobile controls
     Button btnLeft, btnRight;
@@ -156,6 +156,18 @@ public class PongCircleHud : MonoBehaviour
         btnReturn = root.Q<Button>("btn-return");
         if (btnReplay != null) btnReplay.clicked += OnReplayClicked;
         if (btnReturn != null) btnReturn.clicked += OnReturnLobbyClicked;
+
+        winScores = new Label();
+        winScores.style.marginTop = 10;
+        winScores.style.unityTextAlign = TextAnchor.MiddleCenter;
+        winScores.style.fontSize = 16;
+        winScores.style.color = new StyleColor(Color.white);
+        if (panelWin != null)
+        {
+            int subIndex = winSubtitle != null ? panelWin.IndexOf(winSubtitle) : -1;
+            if (subIndex >= 0) panelWin.Insert(subIndex + 1, winScores);
+            else panelWin.Add(winScores);
+        }
 
         // Mobile controls (maintien enfoncé)
         btnLeft = root.Q<Button>("btn-left");
@@ -470,6 +482,25 @@ public class PongCircleHud : MonoBehaviour
             SetText(winVotes, "Votes replay : " + ReplayVoteCount() + " / " + Game.MinimumPlayers);
             SetText(winCountdown, "Prochaine action dans : " + PostGameRemainingSeconds() + "s");
         }
+        RebuildWinScores();
+    }
+
+    void RebuildWinScores()
+    {
+        if (winScores == null || Game == null) return;
+        var infos = Game.GetPlayerInfos();
+        if (infos == null || infos.Count == 0) { winScores.text = ""; return; }
+
+        infos.Sort((a, b) => b.Score.CompareTo(a.Score));
+        var sb = new System.Text.StringBuilder();
+        sb.Append("Scores :\n");
+        for (int i = 0; i < infos.Count; i++)
+        {
+            string prefix = i == 0 ? "★ " : "  ";
+            sb.Append(prefix + infos[i].Name + " — " + infos[i].Score + " pts");
+            if (i < infos.Count - 1) sb.Append("\n");
+        }
+        winScores.text = sb.ToString();
     }
 
     // --- Actions ---

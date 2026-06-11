@@ -16,7 +16,7 @@ public class PongCircleHud : MonoBehaviour
     VisualElement panelJoin, panelLobby, panelHud, panelWin, panelEliminated, mobileControls;
 
     // Join panel
-    Button btnJoin;
+    Button btnJoin, btnSpectate;
     Label joinTitle, joinSubtitle, joinYourPlayer, joinNetwork, joinPlayers, joinMin, joinHint, joinCountdown;
     VisualElement joinDevices, joinLobbyDevices, joinIdentity;
 
@@ -28,7 +28,7 @@ public class PongCircleHud : MonoBehaviour
 
     // In-game HUD panel
     Button btnRestart;
-    Label hudPlayers, hudAlive, hudStatus, hudNetwork;
+    Label hudPlayers, hudAlive, hudStatus, hudNetwork, hudRace;
     VisualElement hudDevices, hudLobbyDevices;
 
     // Win panel
@@ -43,23 +43,8 @@ public class PongCircleHud : MonoBehaviour
 
     TextField nameField;
     VisualElement colorRow;
-    string chosenName = "";
-    Color chosenColor;
-    int chosenColorIndex = -1;
+    PongCircleIdentity identity;
     int lastIdentityTarget = -2;
-
-    static readonly Color[] Palette = {
-        new Color(0.345f, 0.902f, 0.784f), // turquoise
-        new Color(0.961f, 0.353f, 0.408f), // rouge
-        new Color(0.984f, 0.686f, 0.243f), // orange
-        new Color(0.969f, 0.878f, 0.318f), // jaune
-        new Color(0.486f, 0.812f, 0.380f), // vert
-        new Color(0.388f, 0.616f, 0.961f), // bleu
-        new Color(0.706f, 0.514f, 0.961f), // violet
-        new Color(0.961f, 0.510f, 0.776f), // rose
-        new Color(0.380f, 0.835f, 0.961f), // cyan
-        new Color(0.741f, 0.910f, 0.376f), // citron vert
-    };
 
     void OnEnable()
     {
@@ -101,18 +86,20 @@ public class PongCircleHud : MonoBehaviour
         joinIdentity = root.Q<VisualElement>("join-identity");
         btnJoin = root.Q<Button>("btn-join");
         if (btnJoin != null) btnJoin.clicked += OnJoinClicked;
+        btnSpectate = root.Q<Button>("btn-spectate");
+        if (btnSpectate != null) btnSpectate.clicked += OnSpectateClicked;
 
         // Identité : nom + palette de couleurs
         nameField = root.Q<TextField>("join-name");
         colorRow = root.Q<VisualElement>("join-colors");
-        LoadIdentityPrefs();
+        identity = PongCircleIdentityStore.Load();
         if (nameField != null)
         {
-            nameField.SetValueWithoutNotify(chosenName);
+            nameField.SetValueWithoutNotify(identity.Name);
             nameField.RegisterValueChangedCallback(e =>
             {
-                chosenName = e.newValue;
-                SaveIdentityPrefs();
+                identity = PongCircleIdentityStore.WithName(identity, e.newValue);
+                PongCircleIdentityStore.Save(identity);
                 ApplyIdentity();
                 SendIdentityToServer();
             });
@@ -145,6 +132,18 @@ public class PongCircleHud : MonoBehaviour
         hudLobbyDevices = root.Q<VisualElement>("hud-lobby-devices");
         btnRestart = root.Q<Button>("btn-restart");
         if (btnRestart != null) btnRestart.clicked += OnRestartClicked;
+
+        hudRace = new Label();
+        hudRace.style.position = Position.Absolute;
+        hudRace.style.top = 10;
+        hudRace.style.left = 0;
+        hudRace.style.right = 0;
+        hudRace.style.unityTextAlign = TextAnchor.UpperCenter;
+        hudRace.style.fontSize = 22;
+        hudRace.style.color = new StyleColor(Color.yellow);
+        hudRace.style.unityFontStyleAndWeight = FontStyle.Bold;
+        hudRace.visible = false;
+        root.Add(hudRace);
 
         // Win
         winTitle = root.Q<Label>("win-title");
@@ -203,10 +202,11 @@ public class PongCircleHud : MonoBehaviour
     {
         bool network = ShouldUseNetwork();
         int localId = LocalPlayerId();
+        bool spectator = IsSpectator();
         bool started = Game.IsGameStarted;
         bool hasWinner = Game.WinnerId > 0;
 
-        bool showJoin = (network && localId <= 0) || (network && !started && !hasWinner);
+        bool showJoin = (network && !spectator && localId <= 0) || (network && !started && !hasWinner);
         bool showWin = !showJoin && hasWinner;
         bool showEliminated = !showJoin && !showWin && network && started && localId > 0 && !Game.IsLocalPlayerAlive;
         bool showLobby = !showJoin && !showWin && !showEliminated && !network && !started;
@@ -254,14 +254,15 @@ public class PongCircleHud : MonoBehaviour
         }
 
         SetText(btnJoin, Game.IsGameStarted ? "Rejoindre la partie" : "Jouer / Rejoindre");
+        Show(btnSpectate, ShouldUseNetwork() && Game.IsGameStarted && localId <= 0 && !IsSpectator());
         SetText(joinNetwork, "Réseau : " + NetworkStatus());
-        SetText(joinPlayers, "Joueurs : " + ConnectedPlayerCount() + " / " + Game.MaximumPlayers);
+        SetText(joinPlayers, "Joueurs : " + ConnectedPlayerCount() + " / " + Game.MaximumPlayers + "   Spectateurs : " + SpectatorCount());
         SetText(joinMin, "Minimum pour lancer : " + Game.MinimumPlayers);
         if (localId > 0) SetText(joinYourPlayer, "Votre joueur : " + localId);
 
         SetText(joinHint, localId > 0
             ? "La partie se lance quand assez de joueurs ont rejoint."
-            : "Tu es dans le menu tant que tu n'as pas rejoint la partie.");
+            : (Game.IsGameStarted ? "Choisis joueur pour entrer dans la partie, ou spectateur pour regarder." : "Tu es dans le menu tant que tu n'as pas rejoint la partie."));
 
         // Listes "En jeu" / "Lobby" masquées dans le menu d'accueil.
         // RebuildInGameDevices(joinDevices, ref sigJoinDevices);
@@ -274,12 +275,12 @@ public class PongCircleHud : MonoBehaviour
     {
         if (colorRow == null) return;
         colorRow.Clear();
-        for (int i = 0; i < Palette.Length; i++)
+        for (int i = 0; i < PongCircleIdentityStore.Palette.Length; i++)
         {
             int index = i;
             Button swatch = new Button();
             swatch.AddToClassList("color-swatch");
-            swatch.style.backgroundColor = Palette[i];
+            swatch.style.backgroundColor = PongCircleIdentityStore.Palette[i];
             swatch.clicked += () => SelectColor(index);
             colorRow.Add(swatch);
         }
@@ -288,9 +289,8 @@ public class PongCircleHud : MonoBehaviour
 
     void SelectColor(int index)
     {
-        chosenColorIndex = index;
-        chosenColor = Palette[index];
-        SaveIdentityPrefs();
+        identity = PongCircleIdentityStore.WithColor(identity, index);
+        PongCircleIdentityStore.Save(identity);
         UpdateSwatchSelection();
         ApplyIdentity();
         SendIdentityToServer();
@@ -300,8 +300,7 @@ public class PongCircleHud : MonoBehaviour
     void SendIdentityToServer()
     {
         if (!ShouldUseUdp()) return;
-        string hex = chosenColorIndex >= 0 ? ColorUtility.ToHtmlStringRGB(chosenColor) : "";
-        Udp.SetIdentity(chosenName, hex);
+        Udp.SetIdentity(identity.Name, identity.ColorHex);
     }
 
     void UpdateSwatchSelection()
@@ -310,7 +309,7 @@ public class PongCircleHud : MonoBehaviour
         int i = 0;
         foreach (VisualElement child in colorRow.Children())
         {
-            child.EnableInClassList("color-swatch--selected", i == chosenColorIndex);
+            child.EnableInClassList("color-swatch--selected", i == identity.ColorIndex);
             i++;
         }
     }
@@ -328,8 +327,8 @@ public class PongCircleHud : MonoBehaviour
         int i = 0;
         foreach (VisualElement child in colorRow.Children())
         {
-            string hex = ColorUtility.ToHtmlStringRGB(Palette[i]);
-            bool blocked = i != chosenColorIndex && taken.Contains(hex);
+            string hex = ColorUtility.ToHtmlStringRGB(PongCircleIdentityStore.Palette[i]);
+            bool blocked = i != identity.ColorIndex && taken.Contains(hex);
             child.SetEnabled(!blocked);
             i++;
         }
@@ -340,7 +339,7 @@ public class PongCircleHud : MonoBehaviour
         if (devices == null) return;
         foreach (PongCircleNetworkDeviceState d in devices)
         {
-            if (d != null && !string.IsNullOrEmpty(d.color))
+            if (d != null && !d.spectator && !string.IsNullOrEmpty(d.color))
             {
                 set.Add(d.color.ToUpperInvariant());
             }
@@ -366,13 +365,13 @@ public class PongCircleHud : MonoBehaviour
         int index = IdentityTargetIndex();
         if (Game == null || index < 0 || index >= Game.CurrentPlayerCount) return;
 
-        if (!string.IsNullOrWhiteSpace(chosenName))
+        if (!string.IsNullOrWhiteSpace(identity.Name))
         {
-            Game.SetPlayerName(index, chosenName);
+            Game.SetPlayerName(index, identity.Name);
         }
-        if (chosenColorIndex >= 0)
+        if (identity.HasColor)
         {
-            Game.SetPlayerColor(index, chosenColor);
+            Game.SetPlayerColor(index, identity.Color);
         }
     }
 
@@ -385,27 +384,6 @@ public class PongCircleHud : MonoBehaviour
             lastIdentityTarget = index;
             if (index >= 0) ApplyIdentity();
         }
-    }
-
-    void LoadIdentityPrefs()
-    {
-        chosenName = PlayerPrefs.GetString("pong_name", "");
-        chosenColorIndex = PlayerPrefs.GetInt("pong_color_index", -1);
-        if (chosenColorIndex >= 0 && chosenColorIndex < Palette.Length)
-        {
-            chosenColor = Palette[chosenColorIndex];
-        }
-        else
-        {
-            chosenColorIndex = -1;
-        }
-    }
-
-    void SaveIdentityPrefs()
-    {
-        PlayerPrefs.SetString("pong_name", chosenName ?? "");
-        PlayerPrefs.SetInt("pong_color_index", chosenColorIndex);
-        PlayerPrefs.Save();
     }
 
     void RefreshLobby()
@@ -427,10 +405,33 @@ public class PongCircleHud : MonoBehaviour
         SetText(hudAlive, "En vie : " + Game.AlivePlayerCount);
         SetText(hudStatus, "Statut : " + Game.Status);
         Show(hudNetwork, network);
+        if (network && IsSpectator()) SetText(hudStatus, "Statut : " + Game.Status + "   Mode spectateur");
         if (network) SetText(hudNetwork, "Réseau : " + NetworkStatus());
 
         RebuildInGameDevices(hudDevices, ref sigHudDevices);
         RebuildLobbyDevices(hudLobbyDevices, ref sigHudLobby);
+        RefreshRace();
+    }
+
+    void RefreshRace()
+    {
+        if (hudRace == null || Game == null) return;
+
+        if (Game.RaceActive)
+        {
+            int secs = Mathf.CeilToInt(Game.RaceRemainingMs / 1000f);
+            hudRace.text = "COURSE ! Appuie sur ESPACE ! (" + secs + "s)";
+            hudRace.visible = true;
+        }
+        else if (Game.RaceWinnerId > 0)
+        {
+            hudRace.text = Game.RaceWinnerName + " remporte la course ! +2 pts";
+            hudRace.visible = true;
+        }
+        else
+        {
+            hudRace.visible = false;
+        }
     }
 
     void RefreshWin(bool network)
@@ -453,6 +454,11 @@ public class PongCircleHud : MonoBehaviour
     {
         if (ShouldUseUdp()) Udp.SendStartGame();
         else if (Game != null) Game.StartGame();
+    }
+
+    void OnSpectateClicked()
+    {
+        if (ShouldUseUdp()) Udp.SendSpectateGame();
     }
 
     void OnLocalStartClicked()
@@ -542,7 +548,7 @@ public class PongCircleHud : MonoBehaviour
         foreach (PongCircleNetworkDeviceState d in devices)
         {
             if (d == null) continue;
-            container.Add(MakeListLabel(d.name + " (pas en jeu)", false));
+            container.Add(MakeListLabel(d.name + (d.spectator ? " (spectateur)" : " (pas en jeu)"), false));
         }
     }
 
@@ -554,7 +560,8 @@ public class PongCircleHud : MonoBehaviour
         {
             if (d == null) continue;
             sb.Append(d.playerId).Append(':').Append(d.name)
-              .Append(':').Append(d.lives).Append(':').Append(d.points).Append(';');
+              .Append(':').Append(d.lives).Append(':').Append(d.points)
+              .Append(':').Append(d.spectator).Append(';');
         }
         return sb.ToString();
     }
@@ -572,7 +579,9 @@ public class PongCircleHud : MonoBehaviour
     bool ShouldUseUdp() => launcher != null && launcher.EnableUdpSync && launcher.UdpClient != null;
     bool ShouldUseNetwork() => ShouldUseUdp();
     int LocalPlayerId() => ShouldUseUdp() ? Udp.LocalPlayerId : 0;
+    bool IsSpectator() => ShouldUseUdp() && Udp.IsSpectator;
     int ConnectedPlayerCount() => ShouldUseUdp() ? Udp.ConnectedPlayerCount : 0;
+    int SpectatorCount() => ShouldUseUdp() ? Udp.SpectatorCount : 0;
     int ReplayVoteCount() => ShouldUseUdp() ? Udp.ReplayVoteCount : 0;
     int PostGameRemainingSeconds() => ShouldUseUdp() ? Udp.PostGameRemainingSeconds : 0;
     int StartCountdownSeconds() => ShouldUseUdp() ? Udp.StartCountdownSeconds : 0;

@@ -1,7 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.InputSystem;
-using UnityEngine.InputSystem.Controls;
 #if UNITY_EDITOR
 using UnityEditor;
 #endif
@@ -32,12 +31,13 @@ public class PongCircleGame : MonoBehaviour
     [Header("Effets visuels")]
     public bool EnableJuice = true;
 
-    [Header("Réseau — lissage")]
+    [Header("Réseau — lissage (réduction de latence ressentie)")]
     public bool NetworkSmoothing = true;
     public bool LocalPaddlePrediction = true;
-    public float PaddleSmoothingSpeed = 14f;   
-    public float PaddleReconcileSpeed = 2f;     
-    public float BallSmoothingSpeed = 12f;      
+    public bool RemoteDeadReckoning = true;
+    public float PaddleSmoothingSpeed = 14f;
+    public float PaddleReconcileSpeed = 2f;
+    public float BallSmoothingSpeed = 12f;
 
     public int CurrentPlayerCount {
       get {
@@ -62,6 +62,11 @@ public class PongCircleGame : MonoBehaviour
         return status;
       }
     }
+
+    public bool RaceActive { get { return raceActive; } }
+    public int RaceWinnerId { get { return raceWinnerId; } }
+    public string RaceWinnerName { get { return raceWinnerName; } }
+    public int RaceRemainingMs { get { return raceRemainingMs; } }
 
     public bool IsGameStarted {
       get {
@@ -89,8 +94,12 @@ public class PongCircleGame : MonoBehaviour
     float countdownRemaining;
     int winnerId;
     string status = "Playing";
+    bool raceActive;
+    int raceWinnerId;
+    string raceWinnerName = "";
+    int raceRemainingMs;
 
-    // État réseau pour l'interpolation/prédiction.
+    // État réseau pour l'interpolation/prédiction (Update les consomme entre 2 snapshots).
     int networkLocalPlayerId;
     float networkLocalDirection;
     Vector2 netBallPosition;
@@ -100,16 +109,17 @@ public class PongCircleGame : MonoBehaviour
     bool wasSmashing;
     bool wasDeadly;
 
-    // Effets shake caméra + détection de rebond.
-    Camera juiceCamera;
-    Vector3 cameraBasePos;
-    bool cameraCaptured;
-    float shakeIntensity;
-    Vector2 prevBallDir;
-    bool hasPrevBallDir;
-    int lastAlivePlayerCount = -1;
-    int lastWinnerIdSeen;
-    float localSmashArmedUntil;
+    // Effets "juice" : shake caméra + détection de rebond (pop + pulse de raquette).
+    PongCircleJuice juice;
+
+    PongCircleJuice Juice {
+      get {
+        if (juice == null) {
+          juice = new PongCircleJuice(this, transform);
+        }
+        return juice;
+      }
+    }
 
     void OnEnable() {
       if (!Application.isPlaying) {
@@ -170,6 +180,11 @@ public class PongCircleGame : MonoBehaviour
         return;
       }
 
+      if (Keyboard.current != null && Keyboard.current.tabKey.wasPressedThisFrame) {
+        RemoteDeadReckoning = !RemoteDeadReckoning;
+        Debug.Log("Dead reckoning (remote paddles) : " + (RemoteDeadReckoning ? "ON" : "OFF"));
+      }
+
       if (!NetworkControlled && !gameStarted && !gameOver) {
         UpdateLobbyCountdown();
       }
@@ -188,10 +203,6 @@ public class PongCircleGame : MonoBehaviour
 
     public void SetLocalPredictedInput(float direction) {
       networkLocalDirection = Mathf.Clamp(direction, -1f, 1f);
-    }
-
-    public void ArmLocalSmash() {
-      localSmashArmedUntil = Time.unscaledTime + 1.5f;
     }
 
     void UpdateNetworkInterpolation() {
@@ -218,9 +229,15 @@ public class PongCircleGame : MonoBehaviour
 
         if (LocalPaddlePrediction && player.Id == networkLocalPlayerId) {
           player.PaddleAngle += networkLocalDirection * PaddleAngularSpeed * dt;
-          player.PaddleAngle = Mathf.LerpAngle(player.PaddleAngle, player.PaddleAngleTarget, reconcileK);
+          if (Mathf.Abs(networkLocalDirection) < 0.01f) {
+            player.PaddleAngle = Mathf.LerpAngle(player.PaddleAngle, player.PaddleAngleTarget, reconcileK);
+          }
           player.PaddleAngle = ClampPaddleAngle(player.PaddleAngle, player.SectorStartAngle, player.SectorEndAngle);
         } else {
+          if (RemoteDeadReckoning) {
+            player.PaddleAngleTarget += player.NetworkInput * PaddleAngularSpeed * dt;
+            player.PaddleAngleTarget = ClampPaddleAngle(player.PaddleAngleTarget, player.SectorStartAngle, player.SectorEndAngle);
+          }
           player.PaddleAngle = Mathf.LerpAngle(player.PaddleAngle, player.PaddleAngleTarget, remoteK);
         }
       }
@@ -232,7 +249,7 @@ public class PongCircleGame : MonoBehaviour
       if (!CanStart) {
         if (countdownActive) {
           countdownActive = false;
-          status = "En attente de joueurs";
+          status = "Waiting for players";
         }
         return;
       }
@@ -257,7 +274,7 @@ public class PongCircleGame : MonoBehaviour
       gameOver = false;
       countdownActive = false;
       winnerId = 0;
-      status = "En attente de joueurs";
+      status = "Waiting for players";
 
       if (Ball != null) {
         Ball.SetActive(false);
@@ -396,6 +413,10 @@ public class PongCircleGame : MonoBehaviour
       gameStarted = snapshot.gameStarted;
       gameOver = snapshot.gameOver;
       winnerId = snapshot.winnerId;
+      raceActive = snapshot.raceActive;
+      raceWinnerId = snapshot.raceWinnerId;
+      raceWinnerName = snapshot.raceWinnerName ?? "";
+      raceRemainingMs = snapshot.raceRemainingMs;
       if (!string.IsNullOrEmpty(snapshot.status)) {
         status = snapshot.status;
       }
@@ -408,14 +429,7 @@ public class PongCircleGame : MonoBehaviour
           }
 
           player.IsAlive = playerState.alive;
-
-          if (player.Lives >= 0 && playerState.lives < player.Lives && gameStarted) {
-            SpawnLifeLossText(player);
-          }
-          player.Lives = playerState.lives;
-
-          // Cible réseau autoritative ; le lissage (Update) rapproche PaddleAngle de
-          // cette cible. Au 1er snapshot (ou lissage désactivé), on cale directement.
+          player.NetworkInput = playerState.input;
           player.PaddleAngleTarget = playerState.paddleAngle;
           if (!player.HasPaddleAngle || !NetworkSmoothing) {
             player.PaddleAngle = playerState.paddleAngle;
@@ -453,8 +467,16 @@ public class PongCircleGame : MonoBehaviour
       netBallSpeed = snapshot.ballSpeed > 0.01f ? snapshot.ballSpeed : BallSpeed;
       hasNetworkBall = ballActive;
 
-      DetectBounceEffects(authoritativeBall, netBallDirection);
-      DetectStateEffects();
+      Juice.DetectBounceEffects(
+        EnableJuice,
+        gameStarted,
+        gameOver,
+        authoritativeBall,
+        netBallDirection,
+        ArenaRadius,
+        ballStartPosition.z,
+        PulsePaddleAtAngle);
+      Juice.DetectStateEffects(EnableJuice, CountAlivePlayers(), gameStarted, winnerId);
       UpdateBallVisual(netBallSpeed, snapshot.ballDeadly);
     }
 
@@ -493,280 +515,78 @@ public class PongCircleGame : MonoBehaviour
     }
 
     GameObject CreateSector(string objectName, float startAngle, float endAngle, Color color) {
-      GameObject obj = new GameObject(objectName);
-      obj.transform.SetParent(transform);
-
-      MeshFilter meshFilter = obj.AddComponent<MeshFilter>();
-      MeshRenderer meshRenderer = obj.AddComponent<MeshRenderer>();
-      meshFilter.mesh = BuildSectorMesh(startAngle, endAngle);
-      Color fill = color;
-      fill.a = Mathf.Max(color.a, 0.5f);
-      meshRenderer.material = CreateMaterial(fill, 1.1f);
-
-      generatedObjects.Add(obj);
-      return obj;
-    }
-
-    Mesh BuildSectorMesh(float startAngle, float endAngle) {
-      int arcSteps = 16;
-      Vector3[] vertices = new Vector3[arcSteps + 2];
-      int[] triangles = new int[arcSteps * 3];
-
-      vertices[0] = Vector3.zero;
-      vertices[0].z = SectorZ;
-      for (int i = 0; i <= arcSteps; i++) {
-        float t = (float)i / arcSteps;
-        float angle = Mathf.Lerp(startAngle, endAngle, t);
-        vertices[i + 1] = AngleToDirection(angle) * ArenaRadius;
-        vertices[i + 1].z = SectorZ;
-      }
-
-      for (int i = 0; i < arcSteps; i++) {
-        int tri = i * 3;
-        triangles[tri] = 0;
-        triangles[tri + 1] = i + 2;
-        triangles[tri + 2] = i + 1;
-      }
-
-      Mesh mesh = new Mesh();
-      mesh.vertices = vertices;
-      mesh.triangles = triangles;
-      mesh.RecalculateNormals();
-      mesh.RecalculateBounds();
-      return mesh;
+      return PongCircleArenaFactory.CreateSector(
+        transform,
+        generatedObjects,
+        objectName,
+        startAngle,
+        endAngle,
+        color,
+        ArenaRadius,
+        SectorZ);
     }
 
     GameObject CreatePaddle(string objectName, Color color) {
-      GameObject obj = GameObject.CreatePrimitive(PrimitiveType.Cube);
-      obj.name = objectName;
-      obj.transform.SetParent(transform);
-      obj.GetComponent<Renderer>().material = CreateMaterial(new Color(color.r, color.g, color.b, 1), 1.6f);
-      Collider collider = obj.GetComponent<Collider>();
-      if (collider != null) {
-        DestroyObject(collider);
-      }
-      generatedObjects.Add(obj);
-      return obj;
-    }
-
-    Material CreateMaterial(Color color) {
-      return CreateMaterial(color, 0f);
-    }
-
-    Shader ResolveShader(params string[] names) {
-      foreach (string name in names) {
-        Shader shader = Shader.Find(name);
-        if (shader != null) {
-          return shader;
-        }
-      }
-
-      return Shader.Find("Hidden/InternalErrorShader");
+      return PongCircleArenaFactory.CreatePaddle(transform, generatedObjects, objectName, color);
     }
 
     Material CreateMaterial(Color color, float emission) {
-      Material material = new Material(ResolveShader("Universal Render Pipeline/Lit", "Standard"));
-      material.color = color;
-      if (material.HasProperty("_BaseColor")) {
-        material.SetColor("_BaseColor", color);
-      }
-
-      if (emission > 0f) {
-        material.EnableKeyword("_EMISSION");
-        Color hdr = new Color(color.r, color.g, color.b, 1f).linear * emission;
-        if (material.HasProperty("_EmissionColor")) {
-          material.SetColor("_EmissionColor", hdr);
-        }
-        material.globalIlluminationFlags = MaterialGlobalIlluminationFlags.RealtimeEmissive;
-      }
-
-      if (color.a < 1f) {
-        if (material.HasProperty("_Surface")) { material.SetFloat("_Surface", 1); }
-        if (material.HasProperty("_Mode")) { material.SetFloat("_Mode", 3); }
-        if (material.HasProperty("_SrcBlend")) { material.SetInt("_SrcBlend", (int)UnityEngine.Rendering.BlendMode.SrcAlpha); }
-        if (material.HasProperty("_DstBlend")) { material.SetInt("_DstBlend", (int)UnityEngine.Rendering.BlendMode.OneMinusSrcAlpha); }
-        if (material.HasProperty("_ZWrite")) { material.SetInt("_ZWrite", 0); }
-        material.EnableKeyword("_SURFACE_TYPE_TRANSPARENT");
-        material.EnableKeyword("_ALPHABLEND_ON");
-        material.renderQueue = 3000;
-      }
-
-      return material;
+      return PongCircleMaterialFactory.Create(color, emission);
     }
 
-    Material CreateUnlitHdrMaterial(Color color, float intensity) {
-      Material material = new Material(ResolveShader("Universal Render Pipeline/Unlit", "Unlit/Color"));
-      Color hdr = color.linear * intensity;
-      if (material.HasProperty("_BaseColor")) {
-        material.SetColor("_BaseColor", hdr);
-      }
-      material.color = hdr;
-      return material;
-    }
-
-    static readonly Color NeonAccent = new Color(0.345f, 0.902f, 0.784f, 1f);
+    public static readonly Color NeonAccent = new Color(0.345f, 0.902f, 0.784f, 1f);
 
     void BuildArenaDecor() {
-      GameObject backdrop = new GameObject("ArenaBackdrop");
-      backdrop.transform.SetParent(transform);
-      backdrop.transform.localPosition = new Vector3(0, 0, 0.12f); 
-      MeshFilter backdropFilter = backdrop.AddComponent<MeshFilter>();
-      MeshRenderer backdropRenderer = backdrop.AddComponent<MeshRenderer>();
-      backdropFilter.mesh = BuildSectorMesh(0f, 360f);
-      backdropRenderer.material = CreateMaterial(new Color(0.07f, 0.09f, 0.12f, 1f));
-      generatedObjects.Add(backdrop);
-
-      GameObject ring = new GameObject("ArenaRing");
-      ring.transform.SetParent(transform);
-      LineRenderer line = ring.AddComponent<LineRenderer>();
-      line.useWorldSpace = false;
-      line.loop = true;
-      line.widthMultiplier = 0.08f;
-      line.numCapVertices = 4;
-      int segments = 96;
-      line.positionCount = segments;
-      for (int i = 0; i < segments; i++) {
-        float angle = 360f * i / segments;
-        Vector3 p = AngleToDirection(angle) * ArenaRadius;
-        p.z = 0.05f; 
-        line.SetPosition(i, p);
-      }
-      line.material = CreateUnlitHdrMaterial(NeonAccent, 1.6f);
-      generatedObjects.Add(ring);
+      PongCircleArenaFactory.BuildDecor(transform, generatedObjects, ArenaRadius, SectorZ, NeonAccent);
     }
 
     void StyleBall() {
+      PongCircleArenaFactory.StyleBall(Ball, NeonAccent);
+    }
+
+    void UpdateBallVisual(float speed, bool deadly) {
       if (Ball == null) {
         return;
       }
 
       Renderer renderer = Ball.GetComponent<Renderer>();
-      if (renderer != null) {
-        renderer.material = CreateMaterial(new Color(0.75f, 1f, 0.92f, 1f), 2.5f);
+      if (renderer == null || renderer.material == null) {
+        return;
       }
 
-      TrailRenderer trail = Ball.GetComponent<TrailRenderer>();
-      if (trail == null) {
-        trail = Ball.AddComponent<TrailRenderer>();
+      bool smash = speed > BallSpeed * 1.3f;
+      Color color;
+      if (deadly) {
+        color = new Color(1f, 0.12f, 0.12f, 1f);
+      } else if (smash) {
+        color = new Color(1f, 0.55f, 0.1f, 1f);
+      } else {
+        color = new Color(0.75f, 1f, 0.92f, 1f);
       }
-      trail.time = 0.22f;
-      trail.startWidth = 0.28f;
-      trail.endWidth = 0f;
-      trail.numCapVertices = 2;
-      trail.material = CreateUnlitHdrMaterial(NeonAccent, 2.2f);
-      trail.startColor = new Color(NeonAccent.r, NeonAccent.g, NeonAccent.b, 0.9f);
-      trail.endColor = new Color(NeonAccent.r, NeonAccent.g, NeonAccent.b, 0f);
+
+      renderer.material.color = color;
+      if (renderer.material.HasProperty("_BaseColor")) {
+        renderer.material.SetColor("_BaseColor", color);
+      }
+
+      if (EnableJuice && ((smash && !wasSmashing) || (deadly && !wasDeadly))) {
+        Juice.AddShake(deadly ? 0.16f : 0.12f);
+      }
+
+      wasSmashing = smash;
+      wasDeadly = deadly;
     }
 
+    // --- Effets "juice" -------------------------------------------------------
 
+    // Secousse de caméra : appliquée après tout le reste pour ne pas être écrasée.
     void LateUpdate() {
       if (!Application.isPlaying) {
         return;
       }
-      UpdateShake();
+      Juice.UpdateShake(EnableJuice);
     }
 
-    void AddShake(float amount) {
-      if (EnableJuice) {
-        shakeIntensity = Mathf.Max(shakeIntensity, amount);
-      }
-    }
-
-    void UpdateShake() {
-      if (juiceCamera == null) {
-        juiceCamera = Camera.main;
-        if (juiceCamera == null) {
-          return;
-        }
-        cameraBasePos = juiceCamera.transform.localPosition;
-        cameraCaptured = true;
-      }
-
-      if (!cameraCaptured) {
-        cameraBasePos = juiceCamera.transform.localPosition;
-        cameraCaptured = true;
-      }
-
-      if (shakeIntensity > 0.0001f) {
-        Vector3 offset = new Vector3(Random.value * 2f - 1f, Random.value * 2f - 1f, 0f) * shakeIntensity;
-        juiceCamera.transform.localPosition = cameraBasePos + offset;
-        shakeIntensity = Mathf.Max(0f, shakeIntensity - Time.deltaTime * 1.8f);
-        if (shakeIntensity <= 0.0001f) {
-          juiceCamera.transform.localPosition = cameraBasePos;
-        }
-      }
-    }
-
-    // Détecte élimination (baisse du nb de vivants) et victoire
-    void DetectStateEffects() {
-      if (!EnableJuice) {
-        return;
-      }
-
-      int alive = CountAlivePlayers();
-      if (lastAlivePlayerCount >= 0 && alive < lastAlivePlayerCount && gameStarted) {
-        AddShake(0.18f);
-      }
-      lastAlivePlayerCount = alive;
-
-      if (winnerId > 0 && winnerId != lastWinnerIdSeen) {
-        AddShake(0.30f);
-        lastWinnerIdSeen = winnerId;
-      } else if (winnerId == 0) {
-        lastWinnerIdSeen = 0;
-      }
-    }
-
-    void DetectBounceEffects(Vector2 ballPos, Vector2 dir) {
-      if (!Application.isPlaying || !EnableJuice) {
-        prevBallDir = dir;
-        hasPrevBallDir = true;
-        return;
-      }
-
-      if (hasPrevBallDir && gameStarted && !gameOver) {
-        bool nearRim = ballPos.magnitude > ArenaRadius * 0.7f;
-        float d = Vector2.Dot(prevBallDir.normalized, dir.normalized);
-        if (nearRim && d < 0.5f) {
-          float angleDeg = Mathf.Atan2(ballPos.y, ballPos.x) * Mathf.Rad2Deg;
-          Vector3 impact = AngleToDirection(angleDeg) * ArenaRadius;
-          impact.z = ballStartPosition.z;
-          PlayBounceEffect(impact);
-          PulsePaddleAtAngle(angleDeg);
-        }
-      }
-
-      prevBallDir = dir;
-      hasPrevBallDir = true;
-    }
-
-    void PlayBounceEffect(Vector3 pos) {
-      AddShake(0.05f);
-      StartCoroutine(PopRoutine(pos));
-    }
-
-    System.Collections.IEnumerator PopRoutine(Vector3 pos) {
-      GameObject pop = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-      pop.name = "BouncePop";
-      Collider collider = pop.GetComponent<Collider>();
-      if (collider != null) {
-        DestroyObject(collider);
-      }
-      pop.transform.SetParent(transform);
-      pop.transform.position = pos;
-      pop.GetComponent<Renderer>().material = CreateUnlitHdrMaterial(NeonAccent, 2.6f);
-
-      float t = 0f;
-      const float duration = 0.22f;
-      while (t < duration) {
-        t += Time.deltaTime;
-        float k = Mathf.Clamp01(t / duration);
-        float scale = Mathf.Sin(k * Mathf.PI) * 1.0f + 0.15f;
-        pop.transform.localScale = Vector3.one * scale;
-        yield return null;
-      }
-      Destroy(pop);
-    }
 
     void PulsePaddleAtAngle(float angleDeg) {
       foreach (CirclePlayer player in players) {
@@ -780,91 +600,6 @@ public class PongCircleGame : MonoBehaviour
           return;
         }
       }
-    }
-
-    void UpdateBallVisual(float speed, bool deadly) {
-      if (Ball == null) {
-        return;
-      }
-      Renderer renderer = Ball.GetComponent<Renderer>();
-      if (renderer == null || renderer.material == null) {
-        return;
-      }
-
-      bool smash = speed > BallSpeed * 1.3f;
-      Color color;
-      if (deadly) {
-        color = new Color(1f, 0.12f, 0.12f);
-      } else if (smash) {
-        color = new Color(1f, 0.55f, 0.1f);
-      } else {
-        color = new Color(0.75f, 1f, 0.92f);
-      }
-      renderer.material.color = color;
-      if (renderer.material.HasProperty("_BaseColor")) {
-        renderer.material.SetColor("_BaseColor", color);
-      }
-
-      if ((smash && !wasSmashing) || (deadly && !wasDeadly)) {
-        AddShake(deadly ? 0.16f : 0.12f);
-      }
-      wasSmashing = smash;
-      wasDeadly = deadly;
-    }
-
-    void SpawnLifeLossText(CirclePlayer player) {
-      if (!Application.isPlaying || !EnableJuice) {
-        return;
-      }
-      Vector3 pos = AngleToDirection(player.PaddleAngle) * (ArenaRadius + 0.4f);
-      pos.z = ballStartPosition.z;
-      StartCoroutine(LifeLossRoutine(pos));
-    }
-
-    System.Collections.IEnumerator LifeLossRoutine(Vector3 pos) {
-      GameObject obj = new GameObject("LifeLoss");
-      obj.transform.SetParent(transform);
-      obj.transform.position = pos;
-
-      TextMesh text = obj.AddComponent<TextMesh>();
-      text.text = "-1♥";
-      text.anchor = TextAnchor.MiddleCenter;
-      text.alignment = TextAlignment.Center;
-      text.fontSize = 40;
-      text.characterSize = 0.10f;
-      text.color = new Color(1f, 0.2f, 0.2f);
-
-      Font font = Resources.GetBuiltinResource<Font>("LegacyRuntime.ttf");
-      if (font == null) {
-        font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-      }
-      MeshRenderer meshRenderer = obj.GetComponent<MeshRenderer>();
-      if (font != null) {
-        text.font = font;
-        if (meshRenderer != null) {
-          meshRenderer.material = font.material;
-        }
-      }
-      if (meshRenderer != null) {
-        meshRenderer.sortingOrder = 100;
-      }
-
-      Camera cam = Camera.main;
-      float t = 0f;
-      const float duration = 0.9f;
-      while (t < duration) {
-        t += Time.deltaTime;
-        float k = Mathf.Clamp01(t / duration);
-        obj.transform.position = pos + Vector3.up * (k * 0.8f);
-        if (cam != null) {
-          obj.transform.rotation = cam.transform.rotation * Quaternion.Euler(0f, 180f, 0f);
-        }
-        Color c = text.color;
-        c.a = Mathf.Lerp(1f, 0f, k);
-        text.color = c;
-        yield return null;
-      }
-      Destroy(obj);
     }
 
     void UpdatePaddles() {
@@ -904,10 +639,6 @@ public class PongCircleGame : MonoBehaviour
           pulse = 1f + Mathf.Clamp01(player.PulseTime / 0.18f) * 0.5f;
         }
 
-        if (player.Id == networkLocalPlayerId && Time.unscaledTime < localSmashArmedUntil) {
-          pulse = Mathf.Max(pulse, 1.3f + 0.18f * Mathf.Sin(Time.unscaledTime * 22f));
-        }
-
         Vector3 radial = AngleToDirection(player.PaddleAngle);
         Vector3 tangent = new Vector3(-radial.y, radial.x, 0);
         Transform paddle = player.PaddleObject.transform;
@@ -937,6 +668,12 @@ public class PongCircleGame : MonoBehaviour
         return;
       }
 
+      // Collision : la balle a atteint le bord du cercle (ballPosition.magnitude >= rayon).
+      // 1) On convertit sa position en angle pour savoir par quel SECTEUR elle sort,
+      //    donc quel joueur est censé défendre.
+      // 2) On mesure l'écart angulaire entre le point d'impact et le centre de la raquette.
+      //    Si cet écart est dans la demi-largeur de la raquette → rebond ; sinon le joueur
+      //    a raté et est éliminé.
       float angle = DirectionToAngle(ballPosition);
       CirclePlayer defender = FindPlayerAtAngle(angle);
       if (defender == null || !defender.IsAlive) {
@@ -952,21 +689,22 @@ public class PongCircleGame : MonoBehaviour
       }
     }
 
-   
+    // Rebond de la balle sur une raquette, avec effet de visée.
+    // - La raquette est tangente au cercle ; sa normale est radiale (paddleDirection).
+    //   On réfléchit donc le vecteur vitesse par rapport à cette normale (Vector3.Reflect).
+    // - "offset" ∈ [-1, 1] indique où la balle a frappé sur la raquette (centre = 0,
+    //   bords = ±1). On ajoute une composante tangentielle proportionnelle → le joueur
+    //   peut orienter la balle selon le point de contact (PaddleAimInfluence = dosage).
+    // - Garde-fou : si la balle ne repart pas assez vers l'intérieur, on la ré-incline
+    //   vers le centre pour éviter qu'elle longe le bord.
     void BounceOnPaddle(CirclePlayer defender, float impactAngle) {
       Vector3 impactDirection = AngleToDirection(impactAngle);
-      Vector3 paddleDirection = AngleToDirection(defender.PaddleAngle);
-      Vector3 reflectedDirection = Vector3.Reflect(ballDirection, paddleDirection).normalized;
-
-      float offset = Mathf.DeltaAngle(defender.PaddleAngle, impactAngle) / Mathf.Max(1, PaddleArcDegrees * 0.5f);
-      Vector3 tangent = new Vector3(-paddleDirection.y, paddleDirection.x, 0);
-      Vector3 aimedDirection = (reflectedDirection + tangent * offset * PaddleAimInfluence).normalized;
-
-      if (Vector3.Dot(aimedDirection, -impactDirection) < 0.15f) {
-        aimedDirection = Vector3.Slerp(aimedDirection, -impactDirection, 0.5f).normalized;
-      }
-
-      ballDirection = aimedDirection;
+      ballDirection = PongCircleBallRules.CalculateBounceDirection(
+        ballDirection,
+        defender.PaddleAngle,
+        impactAngle,
+        PaddleArcDegrees,
+        PaddleAimInfluence);
       Ball.transform.position = impactDirection * (ArenaRadius - 0.12f);
     }
 
@@ -978,13 +716,13 @@ public class PongCircleGame : MonoBehaviour
       }
 
       int aliveCount = CountAlivePlayers();
-      Debug.Log(player.Name + " Eliminé. Joueurs vivants: " + aliveCount);
+      Debug.Log(player.Name + " eliminated. Alive players: " + aliveCount);
 
       if (aliveCount <= 1) {
         CirclePlayer winner = FindLastAlivePlayer();
         winnerId = winner != null ? winner.Id : 0;
         gameOver = true;
-        status = winner != null ? winner.Name + " Gagnant!" : " Match nul!";
+        status = winner != null ? winner.Name + " wins!" : "No winner";
 
         if (Ball != null) {
           Ball.SetActive(false);
@@ -995,7 +733,7 @@ public class PongCircleGame : MonoBehaviour
       }
 
       RedistributeAlivePlayers();
-      status = player.Name + " Eliminé";
+      status = player.Name + " eliminated";
       ResetBall();
     }
 
@@ -1013,9 +751,7 @@ public class PongCircleGame : MonoBehaviour
     // passage par 0°/360° : on compare l'écart à la moitié de la largeur du secteur,
     // toujours via Mathf.DeltaAngle (qui gère le wraparound), jamais par simple <=.
     bool AngleInsideSector(float angle, float startAngle, float endAngle) {
-      float center = Mathf.LerpAngle(startAngle, endAngle, 0.5f);
-      float halfSize = Mathf.Abs(Mathf.DeltaAngle(startAngle, endAngle)) * 0.5f;
-      return Mathf.Abs(Mathf.DeltaAngle(center, angle)) <= halfSize;
+      return PongCircleGeometry.AngleInsideSector(angle, startAngle, endAngle);
     }
 
     void ResetBall() {
@@ -1030,58 +766,15 @@ public class PongCircleGame : MonoBehaviour
     }
 
     float ReadLocalDirection(int playerIndex) {
-      Keyboard keyboard = Keyboard.current;
-      if (keyboard == null) {
-        return 0;
-      }
-
-      switch (playerIndex % 8) {
-        case 0:
-          return ReadPair(keyboard.zKey, keyboard.wKey, keyboard.sKey);
-        case 1:
-          return ReadPair(keyboard.upArrowKey, null, keyboard.downArrowKey);
-        case 2:
-          return ReadPair(keyboard.tKey, null, keyboard.gKey);
-        case 3:
-          return ReadPair(keyboard.iKey, null, keyboard.kKey);
-        case 4:
-          return ReadPair(keyboard.fKey, null, keyboard.vKey);
-        case 5:
-          return ReadPair(keyboard.oKey, null, keyboard.lKey);
-        case 6:
-          return ReadPair(keyboard.aKey, null, keyboard.qKey);
-        case 7:
-          return ReadPair(keyboard.numpad8Key, null, keyboard.numpad5Key);
-      }
-
-      return 0;
-    }
-
-    float ReadPair(KeyControl positive, KeyControl alternativePositive, KeyControl negative) {
-      float direction = 0;
-      if ((positive != null && positive.isPressed) || (alternativePositive != null && alternativePositive.isPressed)) {
-        direction += 1;
-      }
-
-      if (negative != null && negative.isPressed) {
-        direction -= 1;
-      }
-
-      return Mathf.Clamp(direction, -1, 1);
+      return PongCircleKeyboardInput.ReadLocalPlayerDirection(playerIndex);
     }
 
     Vector3 AngleToDirection(float angle) {
-      float radians = angle * Mathf.Deg2Rad;
-      return new Vector3(Mathf.Cos(radians), Mathf.Sin(radians), 0);
+      return PongCircleGeometry.AngleToDirection(angle);
     }
 
     float DirectionToAngle(Vector3 direction) {
-      float angle = Mathf.Atan2(direction.y, direction.x) * Mathf.Rad2Deg;
-      if (angle < 0) {
-        angle += 360f;
-      }
-
-      return angle;
+      return PongCircleGeometry.DirectionToAngle(direction);
     }
 
     // Borne l'angle de la raquette pour qu'elle reste ENTIÈREMENT dans son secteur.
@@ -1089,12 +782,7 @@ public class PongCircleGame : MonoBehaviour
     // secteur : le centre de la raquette ne peut donc pas s'approcher du bord à moins
     // d'une demi-raquette, sinon elle déborderait sur le secteur voisin.
     float ClampPaddleAngle(float angle, float startAngle, float endAngle) {
-      float center = Mathf.LerpAngle(startAngle, endAngle, 0.5f);
-      float sectorHalfSize = Mathf.Abs(Mathf.DeltaAngle(startAngle, endAngle)) * 0.5f;
-      float paddleHalfSize = PaddleArcDegrees * 0.5f;
-      float allowedHalfSize = Mathf.Max(0, sectorHalfSize - paddleHalfSize);
-      float delta = Mathf.Clamp(Mathf.DeltaAngle(center, angle), -allowedHalfSize, allowedHalfSize);
-      return center + delta;
+      return PongCircleGeometry.ClampPaddleAngle(angle, startAngle, endAngle, PaddleArcDegrees);
     }
 
     int CountAlivePlayers() {
@@ -1217,7 +905,7 @@ public class PongCircleGame : MonoBehaviour
         Color color = Color.HSVToRGB((float)index / Mathf.Max(1, MaximumPlayers), 0.75f, 1f);
         color.a = SectorAlpha;
         profiles.Add(new PlayerProfile {
-          Name = "Joueur" + (index + 1),
+          Name = "Player " + (index + 1),
           Color = color
         });
       }
@@ -1245,7 +933,7 @@ public class PongCircleGame : MonoBehaviour
         }
       }
 
-      return "Joueur" + id;
+      return "Player " + id;
     }
 
     public void SetPlayerName(int index, string name) {
@@ -1407,8 +1095,8 @@ public class PongCircleGame : MonoBehaviour
       public float SectorEndAngle;
       public float PaddleAngle;
       public float PaddleAngleTarget;
+      public float NetworkInput;
       public float PulseTime;
-      public int Lives = -1;
       public GameObject SectorObject;
       public GameObject PaddleObject;
 

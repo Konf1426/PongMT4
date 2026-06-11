@@ -31,7 +31,7 @@ public static class PongCircleGeometry
       return center + delta;
     }
 
-    public static Mesh BuildSectorMesh(float startAngle, float endAngle, float arenaRadius, float sectorZ, int arcSteps = 16)
+    public static Mesh BuildSectorMesh(float startAngle, float endAngle, float arenaRadius, float sectorZ, int arcSteps = 128)
     {
       Vector3[] vertices = new Vector3[arcSteps + 2];
       int[] triangles = new int[arcSteps * 3];

@@ -245,7 +245,7 @@ socket.on("message", (buffer, remote) => {
     return;
   }
 
-  if (payload.type === "lobby") {
+  if (payload.type === "leave" || payload.type === "lobby") {
     leaveGameForClient(client);
     broadcastSnapshot();
     return;
@@ -512,9 +512,11 @@ function leaveGameForClient(client) {
   client.wantsReplay = false;
   client.playerId = 0;
 
-  if (game.gameStarted && !game.gameOver && leavingPlayer && leavingPlayer.alive) {
-    eliminatePlayer(leavingPlayer);
-    return;
+  if (game.gameStarted && !game.gameOver && leavingPlayer) {
+    leavingPlayer.alive = false;
+    leavingPlayer.lives = 0;
+    leavingPlayer.input = 0;
+    redistributeAlivePlayers();
   }
 
   if (getReadyClients().length === 0) {

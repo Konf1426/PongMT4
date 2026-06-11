@@ -283,7 +283,11 @@ public class PongCircleUdpClient : MonoBehaviour
     }
 
     public void SendReturnLobby() {
-      SendMessage(PongCircleUdpProtocol.Simple("lobby"));
+      localIsSpectator = false;
+      localPlayerId = 0;
+      joinRetryEndTime = 0;
+      nextJoinRetryTime = 0;
+      SendMessage(PongCircleUdpProtocol.Simple("leave"));
     }
 
     public void SendChatMessage(string text) {

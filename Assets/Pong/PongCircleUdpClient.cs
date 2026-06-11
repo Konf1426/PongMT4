@@ -61,6 +61,10 @@ public class PongCircleUdpClient : MonoBehaviour
       get { return lobbyDevices; }
     }
 
+    public PongCircleChatMessageState[] ChatMessages {
+      get { return chatMessages; }
+    }
+
     public int ReplayVoteCount {
       get { return replayVoteCount; }
     }
@@ -96,6 +100,10 @@ public class PongCircleUdpClient : MonoBehaviour
     int sequence;
     PongCircleNetworkDeviceState[] devices = new PongCircleNetworkDeviceState[0];
     PongCircleNetworkDeviceState[] lobbyDevices = new PongCircleNetworkDeviceState[0];
+    PongCircleChatMessageState[] chatMessages = new PongCircleChatMessageState[0];
+    PongCircleChatMessageState[] serverChatMessages = new PongCircleChatMessageState[0];
+    readonly List<PongCircleChatMessageState> pendingChatMessages = new List<PongCircleChatMessageState>();
+    int nextPendingChatId = -1;
     string deviceId;
     string deviceName;
     string chosenDisplayName = "";
@@ -278,6 +286,17 @@ public class PongCircleUdpClient : MonoBehaviour
       SendMessage(PongCircleUdpProtocol.Simple("lobby"));
     }
 
+    public void SendChatMessage(string text) {
+      string clean = CleanChatText(text);
+      if (string.IsNullOrEmpty(clean)) {
+        return;
+      }
+
+      SendMessage(PongCircleUdpProtocol.Chat(clean));
+      AddPendingChatMessage(clean);
+      lastStatus = "UDP chat sent";
+    }
+
     // Identité choisie par l'utilisateur, propagée au serveur
     public void SetIdentity(string name, string colorHex) {
       chosenDisplayName = name ?? "";
@@ -364,6 +383,11 @@ public class PongCircleUdpClient : MonoBehaviour
       if (snapshot.lobbyDevices != null) {
         lobbyDevices = snapshot.lobbyDevices;
       }
+      if (snapshot.chat != null) {
+        serverChatMessages = snapshot.chat;
+        RemoveDeliveredPendingMessages(serverChatMessages);
+        RebuildChatMessages();
+      }
       if (localIsSpectator) {
         lastStatus = "UDP spectator";
       } else {
@@ -416,6 +440,62 @@ public class PongCircleUdpClient : MonoBehaviour
 
     void SendInput(float direction) {
       SendMessage(PongCircleUdpProtocol.Input(direction));
+    }
+
+    string CleanChatText(string text) {
+      if (string.IsNullOrEmpty(text)) {
+        return "";
+      }
+
+      string clean = text.Trim();
+      if (clean.Length > 140) {
+        clean = clean.Substring(0, 140);
+      }
+
+      return clean;
+    }
+
+    void AddPendingChatMessage(string text) {
+      pendingChatMessages.Add(new PongCircleChatMessageState {
+        id = nextPendingChatId--,
+        name = "Moi",
+        text = text
+      });
+
+      while (pendingChatMessages.Count > 5) {
+        pendingChatMessages.RemoveAt(0);
+      }
+
+      RebuildChatMessages();
+    }
+
+    void RemoveDeliveredPendingMessages(PongCircleChatMessageState[] delivered) {
+      if (delivered == null || delivered.Length == 0 || pendingChatMessages.Count == 0) {
+        return;
+      }
+
+      for (int i = pendingChatMessages.Count - 1; i >= 0; i--) {
+        string pendingText = pendingChatMessages[i].text;
+        for (int j = 0; j < delivered.Length; j++) {
+          if (delivered[j] != null && delivered[j].text == pendingText) {
+            pendingChatMessages.RemoveAt(i);
+            break;
+          }
+        }
+      }
+    }
+
+    void RebuildChatMessages() {
+      int serverCount = serverChatMessages != null ? serverChatMessages.Length : 0;
+      int pendingCount = pendingChatMessages.Count;
+      PongCircleChatMessageState[] merged = new PongCircleChatMessageState[serverCount + pendingCount];
+      for (int i = 0; i < serverCount; i++) {
+        merged[i] = serverChatMessages[i];
+      }
+      for (int i = 0; i < pendingCount; i++) {
+        merged[serverCount + i] = pendingChatMessages[i];
+      }
+      chatMessages = merged;
     }
 
     void SendMessage(PongCircleUdpPayload payload) {

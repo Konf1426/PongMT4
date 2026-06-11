@@ -29,6 +29,8 @@ const joinGraceMs = 2000;
 const startCountdownMaxMs = 15000;  
 
 const startingLives = 3;
+const chatHistoryLimit = 30;
+const chatMessageMaxLength = 140;
 
 const survivalPoints = 1;
 const winBonusPoints = 3;
@@ -74,7 +76,9 @@ const game = {
 };
 
 let nextClientId = 1;
+let nextChatMessageId = 1;
 let lastTick = Date.now();
+const lobbyChat = [];
 
 const scoreboard = loadScores();
 let scoresDirty = false;
@@ -189,6 +193,14 @@ socket.on("message", (buffer, remote) => {
 
   if (payload.type === "hello") {
     sendSnapshot(client);
+    return;
+  }
+
+  if (payload.type === "chat") {
+    if (!game.gameStarted && !game.gameOver) {
+      postChatMessage(client, payload.text);
+      broadcastSnapshot();
+    }
     return;
   }
 
@@ -343,6 +355,31 @@ function sanitizeDeviceName(deviceName) {
 
 function sanitizeColor(value) {
   return String(value || "").replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
+}
+
+function sanitizeChatText(value) {
+  return String(value || "")
+    .replace(/[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/g, "")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, chatMessageMaxLength);
+}
+
+function postChatMessage(client, text) {
+  const clean = sanitizeChatText(text);
+  if (!clean) {
+    return;
+  }
+
+  lobbyChat.push({
+    id: nextChatMessageId++,
+    name: clientLabel(client),
+    text: clean
+  });
+
+  while (lobbyChat.length > chatHistoryLimit) {
+    lobbyChat.shift();
+  }
 }
 
 // Vrai si un autre joueur connecté utilise déjà cette couleur (comparaison insensible à la casse).
@@ -1080,6 +1117,8 @@ function buildSnapshot(client, full = true) {
     })
   };
 
+  snapshot.chat = lobbyChat;
+
   if (full) {
     snapshot.status = game.status;
     snapshot.devices = buildDeviceList();
@@ -1102,8 +1141,9 @@ function metaSignature() {
       return p.id + ":" + (owner ? clientLabel(owner) : "") + ":" + (owner ? owner.color : "");
     })
     .join("|");
+  const chat = lobbyChat.length > 0 ? lobbyChat[lobbyChat.length - 1].id : 0;
   return devs + "#" + lobby + "#" + identities + "#" + game.status
-    + "#" + game.lobbyOpen + game.gameStarted + game.gameOver + game.winnerId;
+    + "#" + game.lobbyOpen + game.gameStarted + game.gameOver + game.winnerId + "#" + chat;
 }
 
 function clientForPlayerId(playerId) {

@@ -25,6 +25,15 @@
             <ui:Label text="" name="join-hint" class="hint" />
         </ui:VisualElement>
 
+        <ui:VisualElement name="lobby-chat" class="chat-panel">
+            <ui:Label text="Chat lobby" class="chat-title" />
+            <ui:VisualElement name="chat-messages" class="chat-messages" />
+            <ui:VisualElement class="chat-row">
+                <ui:TextField name="chat-input" class="chat-input" />
+                <ui:Button text="Envoyer" name="btn-chat-send" class="mini-button chat-send" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+
         <!-- Lobby local (hors réseau) -->
         <ui:VisualElement name="panel-lobby" class="card card--topleft">
             <ui:Label text="Circle Pong — Lobby" class="card-title card-title--small" />

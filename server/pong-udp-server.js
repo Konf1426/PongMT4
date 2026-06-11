@@ -5,7 +5,7 @@ const path = require("path");
 
 const UDP_PORT = Number(process.env.UDP_PORT || 41234);
 const HEALTH_PORT = Number(process.env.UDP_HEALTH_PORT || 8082);
-const SERVER_VERSION = "udp-authoritative-2026-06-03-01";
+const SERVER_VERSION = "udp-authoritative-2026-06-11-score";
 
 const arenaRadius = 5;
 const paddleArcDegrees = 22;

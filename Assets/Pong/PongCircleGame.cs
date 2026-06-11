@@ -429,6 +429,7 @@ public class PongCircleGame : MonoBehaviour
           }
 
           player.IsAlive = playerState.alive;
+          player.Points = playerState.points;
           player.NetworkInput = playerState.input;
           player.PaddleAngleTarget = playerState.paddleAngle;
           if (!player.HasPaddleAngle || !NetworkSmoothing) {
@@ -922,11 +923,17 @@ public class PongCircleGame : MonoBehaviour
           Name = player.Name,
           Color = player.Color,
           IsAlive = player.IsAlive,
-          Score = player.Score
+          Score = player.Points
         });
       }
 
       return infos;
+    }
+
+    public int GetPlayerPoints(int id)
+    {
+      CirclePlayer player = FindPlayerById(id);
+      return player != null ? player.Points : 0;
     }
 
     public string GetPlayerName(int id) {
@@ -1092,6 +1099,7 @@ public class PongCircleGame : MonoBehaviour
       public int Id;
       public PlayerProfile Profile;
       public int Score;
+      public int Points;
       public bool IsAlive = true;
       public bool HasPaddleAngle;
       public float SectorStartAngle;

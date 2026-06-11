@@ -88,7 +88,7 @@
             <ui:Label text="Z / W : gauche (AZERTY)" class="controls-line" />
             <ui:Label text="S : droite" class="controls-line" />
             <ui:Label text="Haut / Bas : joueur local 2" class="controls-line" />
-            <ui:Label text="Entree : course rapidite" class="controls-line" />
+            <ui:Label text="SHIFT : course rapidité" class="controls-line" />
             <ui:Label text="Espace : smash" class="controls-line" />
             <ui:Label text="Tab : dead reckoning" class="controls-line" />
         </ui:VisualElement>

@@ -304,7 +304,7 @@
     position: absolute;
     left: 18px;
     bottom: 18px;
-    width: 360px;
+    width: 430px;
     background-color: rgba(11, 15, 20, 0.88);
     border-radius: 8px;
     border-width: 1px;
@@ -316,49 +316,54 @@
 }
 
 .chat-title {
-    font-size: 15px;
+    font-size: 20px;
     -unity-font-style: bold;
     color: rgb(88, 230, 200);
-    margin-bottom: 6px;
+    margin-bottom: 10px;
+}
+
+.chat-scroll {
+    height: 170px;
+    margin-bottom: 8px;
+    flex-shrink: 0;
 }
 
 .chat-messages {
-    min-height: 132px;
-    max-height: 132px;
-    margin-bottom: 8px;
+    flex-grow: 1;
 }
 
 .chat-empty {
-    font-size: 13px;
+    font-size: 16px;
     color: rgb(150, 170, 185);
 }
 
 .chat-line {
-    font-size: 13px;
+    font-size: 16px;
     color: rgb(214, 226, 235);
     white-space: normal;
-    margin-top: 1px;
-    margin-bottom: 1px;
+    margin-top: 3px;
+    margin-bottom: 3px;
 }
 
 .chat-row {
     flex-direction: row;
     align-items: center;
+    flex-shrink: 0;
 }
 
 .chat-input {
     flex-grow: 1;
-    min-height: 30px;
-    margin-right: 6px;
+    min-height: 40px;
+    margin-right: 10px;
 }
 
 .chat-input > #unity-text-input {
-    min-height: 30px;
-    font-size: 14px;
+    min-height: 40px;
+    font-size: 16px;
     color: rgb(20, 24, 30);
 }
 
 .chat-send {
-    width: 74px;
-    height: 30px;
+    width: 92px;
+    height: 40px;
 }

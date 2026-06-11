@@ -103,7 +103,7 @@ public class PongCircleJuice
       hasPrevBallDir = true;
     }
 
-    void AddShake(float amount)
+    public void AddShake(float amount)
     {
       shakeIntensity = Mathf.Max(shakeIntensity, amount);
     }

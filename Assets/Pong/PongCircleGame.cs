@@ -104,7 +104,10 @@ public class PongCircleGame : MonoBehaviour
     float networkLocalDirection;
     Vector2 netBallPosition;
     Vector2 netBallDirection;
+    float netBallSpeed;
     bool hasNetworkBall;
+    bool wasSmashing;
+    bool wasDeadly;
 
     // Effets "juice" : shake caméra + détection de rebond (pop + pulse de raquette).
     PongCircleJuice juice;
@@ -210,7 +213,8 @@ public class PongCircleGame : MonoBehaviour
       float dt = Time.deltaTime;
 
       if (Ball != null && hasNetworkBall) {
-        netBallPosition += netBallDirection * BallSpeed * dt;
+        float speed = netBallSpeed > 0.01f ? netBallSpeed : BallSpeed;
+        netBallPosition += netBallDirection * speed * dt;
         Vector3 target = new Vector3(netBallPosition.x, netBallPosition.y, ballStartPosition.z);
         float ballK = 1f - Mathf.Exp(-BallSmoothingSpeed * dt);
         Ball.transform.position = Vector3.Lerp(Ball.transform.position, target, ballK);
@@ -460,6 +464,7 @@ public class PongCircleGame : MonoBehaviour
       }
       netBallPosition = authoritativeBall;
       netBallDirection = new Vector2(snapshot.ballDirX, snapshot.ballDirY);
+      netBallSpeed = snapshot.ballSpeed > 0.01f ? snapshot.ballSpeed : BallSpeed;
       hasNetworkBall = ballActive;
 
       Juice.DetectBounceEffects(
@@ -472,6 +477,7 @@ public class PongCircleGame : MonoBehaviour
         ballStartPosition.z,
         PulsePaddleAtAngle);
       Juice.DetectStateEffects(EnableJuice, CountAlivePlayers(), gameStarted, winnerId);
+      UpdateBallVisual(netBallSpeed, snapshot.ballDeadly);
     }
 
     void BuildArena(int playerCount) {
@@ -536,6 +542,39 @@ public class PongCircleGame : MonoBehaviour
 
     void StyleBall() {
       PongCircleArenaFactory.StyleBall(Ball, NeonAccent);
+    }
+
+    void UpdateBallVisual(float speed, bool deadly) {
+      if (Ball == null) {
+        return;
+      }
+
+      Renderer renderer = Ball.GetComponent<Renderer>();
+      if (renderer == null || renderer.material == null) {
+        return;
+      }
+
+      bool smash = speed > BallSpeed * 1.3f;
+      Color color;
+      if (deadly) {
+        color = new Color(1f, 0.12f, 0.12f, 1f);
+      } else if (smash) {
+        color = new Color(1f, 0.55f, 0.1f, 1f);
+      } else {
+        color = new Color(0.75f, 1f, 0.92f, 1f);
+      }
+
+      renderer.material.color = color;
+      if (renderer.material.HasProperty("_BaseColor")) {
+        renderer.material.SetColor("_BaseColor", color);
+      }
+
+      if (EnableJuice && ((smash && !wasSmashing) || (deadly && !wasDeadly))) {
+        Juice.AddShake(deadly ? 0.16f : 0.12f);
+      }
+
+      wasSmashing = smash;
+      wasDeadly = deadly;
     }
 
     // --- Effets "juice" -------------------------------------------------------

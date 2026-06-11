@@ -110,6 +110,7 @@ public class PongCircleUdpClient : MonoBehaviour
     float onScreenDirectionTime;
     float lastSentDirection = 999f;
     int redundantSendsLeft;
+    float smashCooldownUntil;
 
     void Awake() {
       Application.runInBackground = true;
@@ -150,6 +151,10 @@ public class PongCircleUdpClient : MonoBehaviour
 
       if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame) {
         SendMessage(PongCircleUdpProtocol.Simple("race"));
+        if (Time.unscaledTime >= smashCooldownUntil) {
+          SendSmash();
+          smashCooldownUntil = Time.unscaledTime + 1.5f;
+        }
       }
 
       float direction = ReadLocalDirection();
@@ -400,6 +405,10 @@ public class PongCircleUdpClient : MonoBehaviour
 
     void SendSpectate() {
       SendMessage(PongCircleUdpProtocol.Simple("spectate"));
+    }
+
+    public void SendSmash() {
+      SendMessage(PongCircleUdpProtocol.Simple("smash"));
     }
 
     void SendInput(float direction) {

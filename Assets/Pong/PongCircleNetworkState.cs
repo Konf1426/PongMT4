@@ -23,6 +23,8 @@ public class PongCircleNetworkSnapshot
     public float ballY;
     public float ballDirX;
     public float ballDirY;
+    public float ballSpeed;
+    public bool ballDeadly;
     public bool raceActive;
     public int raceWinnerId;
     public string raceWinnerName;

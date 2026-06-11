@@ -29,12 +29,20 @@ public class PongCircleUdpClient : MonoBehaviour
       get { return localPlayerId; }
     }
 
+    public bool IsSpectator {
+      get { return localIsSpectator; }
+    }
+
     public int ConnectedPlayerCount {
       get { return connectedPlayerCount; }
     }
 
     public int ReadyPlayerCount {
       get { return readyPlayerCount; }
+    }
+
+    public int SpectatorCount {
+      get { return spectatorCount; }
     }
 
     public bool LobbyOpen {
@@ -77,9 +85,11 @@ public class PongCircleUdpClient : MonoBehaviour
     bool connected;
     bool stopping;
     bool lobbyOpen;
+    bool localIsSpectator;
     int localPlayerId;
     int connectedPlayerCount;
     int readyPlayerCount;
+    int spectatorCount;
     int replayVoteCount;
     int postGameRemainingSeconds;
     int startCountdownSeconds;
@@ -231,11 +241,21 @@ public class PongCircleUdpClient : MonoBehaviour
     }
 
     public void SendStartGame() {
+      localIsSpectator = false;
       joinRetryEndTime = Time.unscaledTime + 10f;
       nextJoinRetryTime = 0;
       lastSnapshotTime = Time.unscaledTime;
       lastStatus = "UDP join sent to " + ServerHost + ":" + ServerPort;
       SendJoin();
+    }
+
+    public void SendSpectateGame() {
+      localIsSpectator = true;
+      localPlayerId = 0;
+      joinRetryEndTime = 0;
+      nextJoinRetryTime = 0;
+      lastStatus = "UDP spectator request sent";
+      SendSpectate();
     }
 
     public void SendRestartLobby() {
@@ -321,10 +341,12 @@ public class PongCircleUdpClient : MonoBehaviour
       }
 
       localPlayerId = snapshot.localPlayerId;
+      localIsSpectator = snapshot.localIsSpectator;
       lastSnapshotTime = Time.unscaledTime;
       lobbyOpen = snapshot.lobbyOpen;
       connectedPlayerCount = snapshot.connectedPlayerCount;
       readyPlayerCount = snapshot.readyPlayerCount;
+      spectatorCount = snapshot.spectatorCount;
       replayVoteCount = snapshot.replayVoteCount;
       postGameRemainingSeconds = snapshot.postGameRemainingSeconds;
       startCountdownSeconds = snapshot.startCountdownSeconds;
@@ -334,9 +356,13 @@ public class PongCircleUdpClient : MonoBehaviour
       if (snapshot.lobbyDevices != null) {
         lobbyDevices = snapshot.lobbyDevices;
       }
-      lastStatus = localPlayerId > 0 ? "UDP player " + localPlayerId : "UDP lobby";
+      if (localIsSpectator) {
+        lastStatus = "UDP spectator";
+      } else {
+        lastStatus = localPlayerId > 0 ? "UDP player " + localPlayerId : "UDP lobby";
+      }
 
-      if (localPlayerId > 0) {
+      if (localPlayerId > 0 || localIsSpectator) {
         joinRetryEndTime = 0;
       }
 
@@ -347,7 +373,7 @@ public class PongCircleUdpClient : MonoBehaviour
     }
 
     void RetryJoinIfNeeded() {
-      if (joinRetryEndTime <= 0 || localPlayerId > 0) {
+      if (joinRetryEndTime <= 0 || localPlayerId > 0 || localIsSpectator) {
         return;
       }
 
@@ -370,6 +396,10 @@ public class PongCircleUdpClient : MonoBehaviour
 
     void SendJoin() {
       SendMessage(PongCircleUdpProtocol.Simple("join"));
+    }
+
+    void SendSpectate() {
+      SendMessage(PongCircleUdpProtocol.Simple("spectate"));
     }
 
     void SendInput(float direction) {

@@ -14,6 +14,7 @@
                 <ui:VisualElement name="join-colors" class="color-row" />
             </ui:VisualElement>
             <ui:Button text="Jouer / Rejoindre" name="btn-join" class="primary-button" />
+            <ui:Button text="Regarder en spectateur" name="btn-spectate" class="secondary-button" />
             <ui:Label text="" name="join-yourplayer" class="info info--accent" />
             <ui:Label text="" name="join-network" class="info" />
             <ui:Label text="" name="join-players" class="info" />

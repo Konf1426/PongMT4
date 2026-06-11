@@ -64,7 +64,7 @@ public static class PongCircleArenaFactory
       line.loop = true;
       line.widthMultiplier = 0.08f;
       line.numCapVertices = 4;
-      int segments = 96;
+      int segments = 256;
       line.positionCount = segments;
       for (int i = 0; i < segments; i++) {
         float angle = 360f * i / segments;

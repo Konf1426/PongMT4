@@ -27,7 +27,9 @@
 
         <ui:VisualElement name="lobby-chat" class="chat-panel">
             <ui:Label text="Chat lobby" class="chat-title" />
-            <ui:VisualElement name="chat-messages" class="chat-messages" />
+            <ui:ScrollView name="chat-scroll" class="chat-scroll">
+                <ui:VisualElement name="chat-messages" class="chat-messages" />
+            </ui:ScrollView>
             <ui:VisualElement class="chat-row">
                 <ui:TextField name="chat-input" class="chat-input" />
                 <ui:Button text="Envoyer" name="btn-chat-send" class="mini-button chat-send" />

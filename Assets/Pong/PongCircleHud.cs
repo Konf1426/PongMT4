@@ -43,6 +43,7 @@ public class PongCircleHud : MonoBehaviour
     // Lobby chat
     TextField chatInput;
     Button btnChatSend;
+    ScrollView chatScroll;
 
     string sigJoinDevices, sigJoinLobby, sigHudDevices, sigHudLobby, sigChat;
 
@@ -78,6 +79,7 @@ public class PongCircleHud : MonoBehaviour
         mobileControls = root.Q<VisualElement>("mobile-controls");
         controlsHelp = root.Q<VisualElement>("controls-help");
         lobbyChat = root.Q<VisualElement>("lobby-chat");
+        chatScroll = root.Q<ScrollView>("chat-scroll");
         chatMessages = root.Q<VisualElement>("chat-messages");
         chatInput = root.Q<TextField>("chat-input");
         btnChatSend = root.Q<Button>("btn-chat-send");
@@ -522,7 +524,7 @@ public class PongCircleHud : MonoBehaviour
             return;
         }
 
-        int start = Mathf.Max(0, messages.Length - 8);
+        int start = 0;
         for (int i = start; i < messages.Length; i++)
         {
             PongCircleChatMessageState message = messages[i];
@@ -531,6 +533,22 @@ public class PongCircleHud : MonoBehaviour
             line.AddToClassList("chat-line");
             chatMessages.Add(line);
         }
+
+        ScrollChatToBottom();
+    }
+
+    void ScrollChatToBottom()
+    {
+        if (chatScroll == null || chatMessages == null || chatMessages.childCount == 0)
+        {
+            return;
+        }
+
+        VisualElement lastMessage = chatMessages[chatMessages.childCount - 1];
+        chatScroll.schedule.Execute(() =>
+        {
+            chatScroll.ScrollTo(lastMessage);
+        }).ExecuteLater(1);
     }
 
     static string ChatSignature(PongCircleChatMessageState[] messages)

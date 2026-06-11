@@ -30,7 +30,7 @@ public class PongCircleHud : MonoBehaviour
     // In-game HUD panel
     Button btnRestart;
     Label hudLocalStats, hudPlayers, hudAlive, hudStatus, hudNetwork, hudRace;
-    VisualElement hudDevices, hudLobbyDevices;
+    VisualElement hudDevices, hudLobbyDevices, hudPlayerBars;
 
     // Win panel
     Button btnReplay, btnReturn;
@@ -44,7 +44,7 @@ public class PongCircleHud : MonoBehaviour
     TextField chatInput;
     Button btnChatSend;
 
-    string sigJoinDevices, sigJoinLobby, sigHudDevices, sigHudLobby, sigChat;
+    string sigJoinDevices, sigJoinLobby, sigHudDevices, sigHudLobby, sigChat, sigPlayerBars;
 
     TextField nameField;
     VisualElement colorRow;
@@ -150,7 +150,7 @@ public class PongCircleHud : MonoBehaviour
 
         hudRace = new Label();
         hudRace.style.position = Position.Absolute;
-        hudRace.style.top = 10;
+        hudRace.style.top = 14;
         hudRace.style.left = 0;
         hudRace.style.right = 0;
         hudRace.style.unityTextAlign = TextAnchor.UpperCenter;
@@ -159,6 +159,17 @@ public class PongCircleHud : MonoBehaviour
         hudRace.style.unityFontStyleAndWeight = FontStyle.Bold;
         hudRace.visible = false;
         root.Add(hudRace);
+
+        hudPlayerBars = new VisualElement();
+        hudPlayerBars.style.position = Position.Absolute;
+        hudPlayerBars.style.top = 50;
+        hudPlayerBars.style.left = 0;
+        hudPlayerBars.style.right = 0;
+        hudPlayerBars.style.flexDirection = FlexDirection.Row;
+        hudPlayerBars.style.justifyContent = Justify.Center;
+        hudPlayerBars.style.alignItems = Align.Center;
+        hudPlayerBars.visible = false;
+        root.Add(hudPlayerBars);
 
         // Win
         winTitle = root.Q<Label>("win-title");
@@ -248,6 +259,8 @@ public class PongCircleHud : MonoBehaviour
         if (showWin) RefreshWin(network);
         if (showLobby) RefreshLobby();
         if (showHud) RefreshHud(network);
+
+        RefreshPlayerBars(!showJoin && (showHud || showEliminated) && network);
 
         TrackIdentity();
     }
@@ -425,7 +438,7 @@ public class PongCircleHud : MonoBehaviour
 
     void RefreshHud(bool network)
     {
-        RefreshLocalStats(network);
+        RefreshLocalStats();
         SetText(hudPlayers, "Joueurs : " + Game.CurrentPlayerCount);
         SetText(hudAlive, "En vie : " + Game.AlivePlayerCount);
         SetText(hudStatus, "Statut : " + Game.Status);
@@ -438,22 +451,9 @@ public class PongCircleHud : MonoBehaviour
         RefreshRace();
     }
 
-    void RefreshLocalStats(bool network)
+    void RefreshLocalStats()
     {
-        int localId = LocalPlayerId();
-        bool showStats = network && localId > 0 && !IsSpectator();
-        Show(hudLocalStats, showStats);
-        if (!showStats) return;
-
-        PongCircleNetworkDeviceState local = FindDeviceByPlayerId(localId);
-        if (local != null)
-        {
-            SetText(hudLocalStats, "P" + localId + "   Vies : " + local.lives + "   Points : " + local.points);
-        }
-        else
-        {
-            SetText(hudLocalStats, "P" + localId + "   Vies : -   Points : -");
-        }
+        Show(hudLocalStats, false);
     }
 
     void RefreshRace()
@@ -475,6 +475,50 @@ public class PongCircleHud : MonoBehaviour
         {
             hudRace.visible = false;
         }
+    }
+
+    void RefreshPlayerBars(bool show)
+    {
+        if (hudPlayerBars == null) return;
+        if (!show) { hudPlayerBars.visible = false; return; }
+
+        PongCircleNetworkDeviceState[] devices = NetworkDevices();
+        if (devices == null || devices.Length == 0) { hudPlayerBars.visible = false; return; }
+
+        string sig = DeviceSignature(devices, false);
+        if (sig == sigPlayerBars) { hudPlayerBars.visible = true; return; }
+        sigPlayerBars = sig;
+        hudPlayerBars.Clear();
+
+        foreach (PongCircleNetworkDeviceState d in devices)
+        {
+            if (d == null || d.playerId <= 0) continue;
+
+            Color c = Color.white;
+            if (!string.IsNullOrEmpty(d.color)) ColorUtility.TryParseHtmlString("#" + d.color, out c);
+
+            VisualElement bar = new VisualElement();
+            bar.style.flexDirection = FlexDirection.Row;
+            bar.style.alignItems = Align.Center;
+            bar.style.backgroundColor = new StyleColor(new Color(c.r, c.g, c.b, 0.20f));
+            bar.style.borderTopColor = bar.style.borderBottomColor =
+            bar.style.borderLeftColor = bar.style.borderRightColor = new StyleColor(c);
+            bar.style.borderTopWidth = bar.style.borderBottomWidth =
+            bar.style.borderLeftWidth = bar.style.borderRightWidth = 2f;
+            bar.style.borderTopLeftRadius = bar.style.borderTopRightRadius =
+            bar.style.borderBottomLeftRadius = bar.style.borderBottomRightRadius = 10f;
+            bar.style.paddingTop = bar.style.paddingBottom = 6;
+            bar.style.paddingLeft = bar.style.paddingRight = 14;
+            bar.style.marginLeft = bar.style.marginRight = 6;
+
+            Label lbl = new Label(d.lives + " ♥   " + d.points + " ★");
+            lbl.style.fontSize = 22;
+            lbl.style.unityFontStyleAndWeight = FontStyle.Bold;
+            lbl.style.color = new StyleColor(Color.white);
+            bar.Add(lbl);
+            hudPlayerBars.Add(bar);
+        }
+        hudPlayerBars.visible = true;
     }
 
     void RefreshWin(bool network)

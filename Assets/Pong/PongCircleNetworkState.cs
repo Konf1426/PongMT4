@@ -33,6 +33,8 @@ public class PongCircleNetworkSnapshot
     public PongCircleNetworkDeviceState[] lobbyDevices;
     public PongCircleNetworkPlayerState[] players;
     public PongCircleChatMessageState[] chat;
+    public string highScoreName;
+    public int highScorePoints;
 }
 
 [Serializable]

@@ -91,9 +91,7 @@ function loadScores() {
         if (entry && entry.deviceId) {
           map.set(entry.deviceId, {
             name: entry.name || "",
-            points: entry.points || 0,
-            wins: entry.wins || 0,
-            games: entry.games || 0
+            bestScore: entry.bestScore || 0
           });
         }
       }
@@ -107,7 +105,7 @@ function loadScores() {
 function getScoreEntry(deviceId, name) {
   let entry = scoreboard.get(deviceId);
   if (!entry) {
-    entry = { name: name || "", points: 0, wins: 0, games: 0 };
+    entry = { name: name || "", bestScore: 0 };
     scoreboard.set(deviceId, entry);
   }
   if (name) {
@@ -116,22 +114,17 @@ function getScoreEntry(deviceId, name) {
   return entry;
 }
 
-function awardPoints(player, amount) {
-  const owner = clientForPlayerId(player.id);
-  if (!owner) {
-    return;
+function updateBestScores() {
+  for (const player of game.players) {
+    if (!player.gamePoints || player.gamePoints <= 0) continue;
+    const owner = clientForPlayerId(player.id);
+    if (!owner) continue;
+    const entry = getScoreEntry(owner.deviceId, clientLabel(owner));
+    if (player.gamePoints > entry.bestScore) {
+      entry.bestScore = player.gamePoints;
+      scoresDirty = true;
+    }
   }
-  getScoreEntry(owner.deviceId, clientLabel(owner)).points += amount;
-  scoresDirty = true;
-}
-
-function pointsForPlayer(player) {
-  const owner = clientForPlayerId(player.id);
-  if (!owner) {
-    return 0;
-  }
-  const entry = scoreboard.get(owner.deviceId);
-  return entry ? entry.points : 0;
 }
 
 function flushScores() {
@@ -139,27 +132,28 @@ function flushScores() {
     return;
   }
   scoresDirty = false;
-  const data = Array.from(scoreboard.entries()).map(([deviceId, entry]) => ({
-    deviceId,
-    name: entry.name,
-    points: entry.points,
-    wins: entry.wins,
-    games: entry.games
-  }));
+  const data = Array.from(scoreboard.entries())
+    .map(([deviceId, entry]) => ({ deviceId, name: entry.name, bestScore: entry.bestScore }))
+    .filter((e) => e.bestScore > 0)
+    .sort((a, b) => b.bestScore - a.bestScore)
+    .slice(0, 10);
   fs.writeFile(scoresFilePath, JSON.stringify(data, null, 2), () => {});
 }
 
 function buildScoreboard() {
   return Array.from(scoreboard.values())
-    .filter((entry) => entry.games > 0 || entry.points > 0)
-    .sort((a, b) => b.points - a.points || b.wins - a.wins)
+    .filter((entry) => entry.bestScore > 0)
+    .sort((a, b) => b.bestScore - a.bestScore)
     .slice(0, 10)
     .map((entry) => ({
       name: entry.name || "Anonyme",
-      points: entry.points,
-      wins: entry.wins,
-      games: entry.games
+      bestScore: entry.bestScore
     }));
+}
+
+function topHighScore() {
+  const top = buildScoreboard()[0];
+  return top ? { name: top.name, score: top.bestScore } : { name: "", score: 0 };
 }
 
 socket.on("message", (buffer, remote) => {
@@ -1012,13 +1006,7 @@ function eliminatePlayer(player) {
   if (alivePlayers.length <= 1) {
     const winner = alivePlayers[0] || null;
     game.winnerId = winner ? winner.id : 0;
-    if (winner) {
-      const owner = clientForPlayerId(winner.id);
-      if (owner) {
-        getScoreEntry(owner.deviceId, clientLabel(owner)).wins += 1;
-        scoresDirty = true;
-      }
-    }
+    updateBestScores();
     game.gameOver = true;
     game.gameStarted = false;
     game.startDeadline = 0;
@@ -1124,6 +1112,8 @@ function buildSnapshot(client, full = true) {
     raceWinnerId: game.race.winnerId,
     raceWinnerName: game.race.winnerName,
     raceRemainingMs: game.race.active ? Math.max(0, game.race.deadline - Date.now()) : 0,
+    highScoreName: full ? topHighScore().name : undefined,
+    highScorePoints: full ? topHighScore().score : undefined,
     players: game.players.map((player) => {
       const owner = clientForPlayerId(player.id);
       return {

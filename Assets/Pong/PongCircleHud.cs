@@ -1,5 +1,6 @@
 using System.Collections.Generic;
 using UnityEngine;
+using UnityEngine.InputSystem;
 using UnityEngine.UIElements;
 
 /// <summary>
@@ -13,7 +14,7 @@ public class PongCircleHud : MonoBehaviour
     bool bound;
 
     // Panels
-    VisualElement panelJoin, panelLobby, panelHud, panelWin, panelEliminated, mobileControls, controlsHelp;
+    VisualElement panelJoin, panelLobby, panelHud, panelWin, panelEliminated, mobileControls, controlsHelp, lobbyChat, chatMessages;
 
     // Join panel
     Button btnJoin, btnSpectate;
@@ -39,7 +40,11 @@ public class PongCircleHud : MonoBehaviour
     Button btnLeft, btnRight;
     float mobileDirection;
 
-    string sigJoinDevices, sigJoinLobby, sigHudDevices, sigHudLobby;
+    // Lobby chat
+    TextField chatInput;
+    Button btnChatSend;
+
+    string sigJoinDevices, sigJoinLobby, sigHudDevices, sigHudLobby, sigChat;
 
     TextField nameField;
     VisualElement colorRow;
@@ -72,6 +77,14 @@ public class PongCircleHud : MonoBehaviour
         panelEliminated = root.Q<VisualElement>("panel-eliminated");
         mobileControls = root.Q<VisualElement>("mobile-controls");
         controlsHelp = root.Q<VisualElement>("controls-help");
+        lobbyChat = root.Q<VisualElement>("lobby-chat");
+        chatMessages = root.Q<VisualElement>("chat-messages");
+        chatInput = root.Q<TextField>("chat-input");
+        btnChatSend = root.Q<Button>("btn-chat-send");
+        root.RegisterCallback<KeyDownEvent>(OnRootKeyDown, TrickleDown.TrickleDown);
+        if (btnChatSend != null) btnChatSend.clicked += OnChatSendClicked;
+        if (chatInput != null) chatInput.RegisterCallback<KeyDownEvent>(OnChatKeyDown, TrickleDown.TrickleDown);
+        if (chatInput != null) chatInput.RegisterValueChangedCallback(_ => UpdateChatSendButton());
 
         // Join
         joinTitle = root.Q<Label>("join-title");
@@ -196,6 +209,12 @@ public class PongCircleHud : MonoBehaviour
             Udp.SetOnScreenDirection(mobileDirection);
         }
 
+        if (IsChatFocused() && Keyboard.current != null
+            && (Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.numpadEnterKey.wasPressedThisFrame))
+        {
+            SendChatFromInput();
+        }
+
         Refresh();
     }
 
@@ -220,6 +239,7 @@ public class PongCircleHud : MonoBehaviour
         Show(panelLobby, showLobby);
         Show(panelHud, showHud);
         Show(controlsHelp, showLobby || showHud || showWin || showEliminated);
+        RefreshChat(network, showJoin, started, hasWinner);
 
         bool showMobile = showHud && network && localId > 0 && ShouldShowMobileControls();
         Show(mobileControls, showMobile);
@@ -472,7 +492,133 @@ public class PongCircleHud : MonoBehaviour
         }
     }
 
+    void RefreshChat(bool network, bool showJoin, bool started, bool hasWinner)
+    {
+        bool show = network && showJoin && !started && !hasWinner && IsNetworkConnected();
+        Show(lobbyChat, show);
+        if (!show)
+        {
+            return;
+        }
+
+        RebuildChatMessages();
+        UpdateChatSendButton();
+    }
+
+    void RebuildChatMessages()
+    {
+        if (chatMessages == null) return;
+        PongCircleChatMessageState[] messages = NetworkChatMessages();
+        string sig = ChatSignature(messages);
+        if (sig == sigChat) return;
+        sigChat = sig;
+
+        chatMessages.Clear();
+        if (messages == null || messages.Length == 0)
+        {
+            Label empty = new Label("Aucun message pour le moment.");
+            empty.AddToClassList("chat-empty");
+            chatMessages.Add(empty);
+            return;
+        }
+
+        int start = Mathf.Max(0, messages.Length - 8);
+        for (int i = start; i < messages.Length; i++)
+        {
+            PongCircleChatMessageState message = messages[i];
+            if (message == null) continue;
+            Label line = new Label((message.name ?? "Joueur") + " : " + (message.text ?? ""));
+            line.AddToClassList("chat-line");
+            chatMessages.Add(line);
+        }
+    }
+
+    static string ChatSignature(PongCircleChatMessageState[] messages)
+    {
+        if (messages == null) return "null";
+        var sb = new System.Text.StringBuilder();
+        foreach (PongCircleChatMessageState message in messages)
+        {
+            if (message == null) continue;
+            sb.Append(message.id).Append(':').Append(message.name).Append(':').Append(message.text).Append(';');
+        }
+        return sb.ToString();
+    }
+
     // --- Actions ---
+    void OnChatSendClicked()
+    {
+        SendChatFromInput();
+    }
+
+    void OnChatKeyDown(KeyDownEvent evt)
+    {
+        if (evt.keyCode != KeyCode.Return && evt.keyCode != KeyCode.KeypadEnter)
+        {
+            return;
+        }
+
+        SendChatFromInput();
+        evt.StopPropagation();
+        evt.PreventDefault();
+    }
+
+    void OnRootKeyDown(KeyDownEvent evt)
+    {
+        if (evt.keyCode != KeyCode.Return && evt.keyCode != KeyCode.KeypadEnter)
+        {
+            return;
+        }
+
+        if (!IsChatFocused())
+        {
+            return;
+        }
+
+        SendChatFromInput();
+        evt.StopPropagation();
+        evt.PreventDefault();
+    }
+
+    void SendChatFromInput()
+    {
+        if (!ShouldUseUdp() || chatInput == null)
+        {
+            return;
+        }
+
+        string text = chatInput.value;
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return;
+        }
+
+        Udp.SendChatMessage(text);
+        chatInput.SetValueWithoutNotify("");
+        UpdateChatSendButton();
+    }
+
+    void UpdateChatSendButton()
+    {
+        SetEnabled(btnChatSend, chatInput != null && !string.IsNullOrWhiteSpace(chatInput.value));
+    }
+
+    bool IsChatFocused()
+    {
+        if (chatInput == null || chatInput.focusController == null)
+        {
+            return false;
+        }
+
+        Focusable focused = chatInput.focusController.focusedElement;
+        if (focused == chatInput)
+        {
+            return true;
+        }
+
+        return focused is VisualElement element && chatInput.Contains(element);
+    }
+
     void OnJoinClicked()
     {
         if (ShouldUseUdp()) Udp.SendStartGame();
@@ -624,6 +770,7 @@ public class PongCircleHud : MonoBehaviour
     string NetworkStatus() => ShouldUseUdp() ? Udp.LastStatus : "Hors ligne";
     PongCircleNetworkDeviceState[] NetworkDevices() => ShouldUseUdp() ? Udp.Devices : null;
     PongCircleNetworkDeviceState[] NetworkLobbyDevices() => ShouldUseUdp() ? Udp.LobbyDevices : null;
+    PongCircleChatMessageState[] NetworkChatMessages() => ShouldUseUdp() ? Udp.ChatMessages : null;
 
     // --- Helpers UI ---
     static void Show(VisualElement element, bool show)
@@ -649,5 +796,6 @@ public class PongCircleHud : MonoBehaviour
         Show(panelWin, false);
         Show(panelEliminated, false);
         Show(mobileControls, false);
+        Show(lobbyChat, false);
     }
 }

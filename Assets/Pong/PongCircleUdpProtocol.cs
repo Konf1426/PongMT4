@@ -8,6 +8,7 @@ public class PongCircleUdpPayload
     public string deviceId;
     public string deviceName;
     public float direction;
+    public string text;
 }
 
 [Serializable]
@@ -64,6 +65,14 @@ public static class PongCircleUdpProtocol
       return new PongCircleUdpPayload {
         type = "input",
         direction = Mathf.Clamp(direction, -1f, 1f)
+      };
+    }
+
+    public static PongCircleUdpPayload Chat(string text)
+    {
+      return new PongCircleUdpPayload {
+        type = "chat",
+        text = text ?? ""
       };
     }
 }

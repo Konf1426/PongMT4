@@ -32,6 +32,15 @@ public class PongCircleNetworkSnapshot
     public PongCircleNetworkDeviceState[] devices;
     public PongCircleNetworkDeviceState[] lobbyDevices;
     public PongCircleNetworkPlayerState[] players;
+    public PongCircleChatMessageState[] chat;
+}
+
+[Serializable]
+public class PongCircleChatMessageState
+{
+    public int id;
+    public string name;
+    public string text;
 }
 
 [Serializable]

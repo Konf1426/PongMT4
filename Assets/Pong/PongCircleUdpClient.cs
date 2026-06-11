@@ -149,8 +149,11 @@ public class PongCircleUdpClient : MonoBehaviour
         return;
       }
 
-      if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame) {
+      if (Keyboard.current != null && (Keyboard.current.enterKey.wasPressedThisFrame || Keyboard.current.numpadEnterKey.wasPressedThisFrame)) {
         SendMessage(PongCircleUdpProtocol.Simple("race"));
+      }
+
+      if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame) {
         if (Time.unscaledTime >= smashCooldownUntil) {
           SendSmash();
           smashCooldownUntil = Time.unscaledTime + 1.5f;

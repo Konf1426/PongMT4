@@ -80,6 +80,7 @@
         <ui:VisualElement name="panel-eliminated" class="card card--center">
             <ui:Label text="Tu as été éliminé" name="eliminated-title" class="card-title" />
             <ui:Label text="En attente de la fin de la manche…" class="card-subtitle" />
+            <ui:Button text="Retour lobby" name="btn-eliminated-return" class="secondary-button" />
         </ui:VisualElement> 
         
         <!-- Contrôles tactiles -->

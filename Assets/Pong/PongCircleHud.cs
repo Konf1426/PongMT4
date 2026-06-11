@@ -33,7 +33,7 @@ public class PongCircleHud : MonoBehaviour
     VisualElement hudDevices, hudLobbyDevices, hudPlayerBars;
 
     // Win panel
-    Button btnReplay, btnReturn;
+    Button btnReplay, btnReturn, btnEliminatedReturn;
     Label winTitle, winSubtitle, winVotes, winCountdown, winScores;
 
     // Mobile controls
@@ -180,8 +180,10 @@ public class PongCircleHud : MonoBehaviour
         winCountdown = root.Q<Label>("win-countdown");
         btnReplay = root.Q<Button>("btn-replay");
         btnReturn = root.Q<Button>("btn-return");
+        btnEliminatedReturn = root.Q<Button>("btn-eliminated-return");
         if (btnReplay != null) btnReplay.clicked += OnReplayClicked;
         if (btnReturn != null) btnReturn.clicked += OnReturnLobbyClicked;
+        if (btnEliminatedReturn != null) btnEliminatedReturn.clicked += OnReturnLobbyClicked;
 
         winScores = new Label();
         winScores.style.marginTop = 10;

@@ -502,11 +502,20 @@ function returnToLobby() {
 }
 
 function leaveGameForClient(client) {
+  const leavingPlayer = client && client.playerId > 0
+    ? game.players[client.playerId - 1]
+    : null;
+
   client.ready = false;
   client.spectator = false;
   client.input = 0;
   client.wantsReplay = false;
   client.playerId = 0;
+
+  if (game.gameStarted && !game.gameOver && leavingPlayer && leavingPlayer.alive) {
+    eliminatePlayer(leavingPlayer);
+    return;
+  }
 
   if (getReadyClients().length === 0) {
     game.lobbyOpen = false;
@@ -772,24 +781,13 @@ function reconcileGameState() {
   }
 
   if (game.gameStarted) {
-    if (readyClients.length < minimumPlayers) {
+    if (readyClients.length === 0) {
       returnToLobby();
       return;
     }
 
-    let changed = readyClients.length !== game.players.length;
-    readyClients.forEach((client, index) => {
-      const expectedPlayerId = index + 1;
-      if (client.playerId !== expectedPlayerId) {
-        client.playerId = expectedPlayerId;
-        changed = true;
-      }
-    });
-
-    if (changed) {
-      rebuildPlayersForReadyClients(readyClients, true);
-      redistributeAlivePlayers();
-    }
+    updateStatus();
+    return;
   }
 
   updateStatus();

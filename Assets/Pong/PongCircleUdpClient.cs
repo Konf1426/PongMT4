@@ -17,6 +17,7 @@ public class PongCircleUdpClient : MonoBehaviour
 #endif
     public int ServerPort = 41234;
     public bool AutoConnect = true;
+    public bool UseRemoteInEditor = false;
     public float InputSendRate = 30;
     public bool DebugNetworkLogging = false;
 
@@ -111,6 +112,7 @@ public class PongCircleUdpClient : MonoBehaviour
     int redundantSendsLeft;
 
     void Awake() {
+      Application.runInBackground = true;
       EnsureCircleGame();
       ApplyEditorDefaultHost();
       ApplyLauncherEnvironment();
@@ -144,6 +146,10 @@ public class PongCircleUdpClient : MonoBehaviour
 
       if (localPlayerId <= 0) {
         return;
+      }
+
+      if (Keyboard.current != null && Keyboard.current.spaceKey.wasPressedThisFrame) {
+        SendMessage(PongCircleUdpProtocol.Simple("race"));
       }
 
       float direction = ReadLocalDirection();
@@ -461,6 +467,7 @@ public class PongCircleUdpClient : MonoBehaviour
 
     void ApplyEditorDefaultHost() {
 #if UNITY_EDITOR
+      if (UseRemoteInEditor) return;
       string launcherHost = Environment.GetEnvironmentVariable("PONG_UDP_HOST");
       if (string.IsNullOrEmpty(launcherHost) && ServerHost == "pong.becop.fr") {
         ServerHost = "127.0.0.1";
@@ -485,13 +492,21 @@ public class PongCircleUdpClient : MonoBehaviour
       string key = "PongCircleUdpDeviceId";
       string existing = PlayerPrefs.GetString(key, "");
       if (!string.IsNullOrEmpty(existing)) {
+#if UNITY_EDITOR
+        return existing + "_" + System.Diagnostics.Process.GetCurrentProcess().Id;
+#else
         return existing;
+#endif
       }
 
       string created = Guid.NewGuid().ToString("N");
       PlayerPrefs.SetString(key, created);
       PlayerPrefs.Save();
+#if UNITY_EDITOR
+      return created + "_" + System.Diagnostics.Process.GetCurrentProcess().Id;
+#else
       return created;
+#endif
     }
 
     string DetectDeviceName() {

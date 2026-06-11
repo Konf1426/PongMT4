@@ -28,7 +28,7 @@ public class PongCircleHud : MonoBehaviour
 
     // In-game HUD panel
     Button btnRestart;
-    Label hudPlayers, hudAlive, hudStatus, hudNetwork;
+    Label hudPlayers, hudAlive, hudStatus, hudNetwork, hudRace;
     VisualElement hudDevices, hudLobbyDevices;
 
     // Win panel
@@ -131,6 +131,18 @@ public class PongCircleHud : MonoBehaviour
         hudLobbyDevices = root.Q<VisualElement>("hud-lobby-devices");
         btnRestart = root.Q<Button>("btn-restart");
         if (btnRestart != null) btnRestart.clicked += OnRestartClicked;
+
+        hudRace = new Label();
+        hudRace.style.position = Position.Absolute;
+        hudRace.style.top = 10;
+        hudRace.style.left = 0;
+        hudRace.style.right = 0;
+        hudRace.style.unityTextAlign = TextAnchor.UpperCenter;
+        hudRace.style.fontSize = 22;
+        hudRace.style.color = new StyleColor(Color.yellow);
+        hudRace.style.unityFontStyleAndWeight = FontStyle.Bold;
+        hudRace.visible = false;
+        root.Add(hudRace);
 
         // Win
         winTitle = root.Q<Label>("win-title");
@@ -381,6 +393,28 @@ public class PongCircleHud : MonoBehaviour
 
         RebuildInGameDevices(hudDevices, ref sigHudDevices);
         RebuildLobbyDevices(hudLobbyDevices, ref sigHudLobby);
+        RefreshRace();
+    }
+
+    void RefreshRace()
+    {
+        if (hudRace == null || Game == null) return;
+
+        if (Game.RaceActive)
+        {
+            int secs = Mathf.CeilToInt(Game.RaceRemainingMs / 1000f);
+            hudRace.text = "COURSE ! Appuie sur ESPACE ! (" + secs + "s)";
+            hudRace.visible = true;
+        }
+        else if (Game.RaceWinnerId > 0)
+        {
+            hudRace.text = Game.RaceWinnerName + " remporte la course ! +2 pts";
+            hudRace.visible = true;
+        }
+        else
+        {
+            hudRace.visible = false;
+        }
     }
 
     void RefreshWin(bool network)

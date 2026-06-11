@@ -1,16 +1,11 @@
 const dgram = require("dgram");
 const http = require("http");
+const fs = require("fs");
 const path = require("path");
-const ballRules = require("./ball-rules");
-const circleMath = require("./circle-math");
-const { createClientRegistry } = require("./client-registry");
-const { createScoreStore } = require("./score-store");
-const { createSnapshotBuilder } = require("./snapshot-builder");
 
 const UDP_PORT = Number(process.env.UDP_PORT || 41234);
 const HEALTH_PORT = Number(process.env.UDP_HEALTH_PORT || 8082);
 const SERVER_VERSION = "udp-authoritative-2026-06-03-01";
-const DEBUG_UDP = process.env.UDP_DEBUG === "1";
 
 const arenaRadius = 5;
 const paddleArcDegrees = 22;
@@ -22,17 +17,23 @@ const maximumPlayers = 10;
 const clientTimeoutMs = 10000;
 
 
-const startCountdownMs = 5000;    
+const startCountdownMs = 5000;
 const joinGraceMs = 2000;         
 const startCountdownMaxMs = 15000;  
 
 const startingLives = 3;
 
-const survivalPoints = 1;          
-const winBonusPoints = 3;           
+const survivalPoints = 1;
+const winBonusPoints = 3;
+const raceBonusPoints = 2;
+const raceIntervalMs = 20000;
+const raceDurationMs = 5000;
+const raceWinnerDisplayMs = 3000;
 const scoresFilePath = path.join(__dirname, "scores.json");
 
 const socket = dgram.createSocket("udp4");
+const clientsByDevice = new Map();
+const clientsByAddress = new Map();
 
 const game = {
   playerCount: minimumPlayers,
@@ -51,84 +52,128 @@ const game = {
   startDeadline: 0,
   countdownPlayerCount: 0,
   winnerId: 0,
-  status: "Waiting for someone to start a game"
+  status: "Waiting for someone to start a game",
+  race: {
+    active: false,
+    deadline: 0,
+    winnerId: 0,
+    winnerName: "",
+    winnerDisplayDeadline: 0,
+    nextRaceTime: 0
+  }
 };
 
+let nextClientId = 1;
 let lastTick = Date.now();
 
-const clients = createClientRegistry({
-  clientTimeoutMs,
-  maximumPlayers,
-  onChange: updateStatus
-});
-const clientsByDevice = clients.clientsByDevice;
+const scoreboard = loadScores();
+let scoresDirty = false;
 
-const scoreStore = createScoreStore(scoresFilePath);
-const snapshots = createSnapshotBuilder({
-  clientsByDevice,
-  clientForPlayerId: clients.clientForPlayerId,
-  clientLabel: clients.clientLabel,
-  countInGameDevices,
-  countReadyDevices,
-  countSpectators: clients.countSpectators,
-  game,
-  maximumPlayers,
-  minimumPlayers,
-  pointsForPlayer,
-  scoreStore
-});
+function loadScores() {
+  try {
+    const data = JSON.parse(fs.readFileSync(scoresFilePath, "utf8"));
+    const map = new Map();
+    if (Array.isArray(data)) {
+      for (const entry of data) {
+        if (entry && entry.deviceId) {
+          map.set(entry.deviceId, {
+            name: entry.name || "",
+            points: entry.points || 0,
+            wins: entry.wins || 0,
+            games: entry.games || 0
+          });
+        }
+      }
+    }
+    return map;
+  } catch {
+    return new Map();
+  }
+}
+
+function getScoreEntry(deviceId, name) {
+  let entry = scoreboard.get(deviceId);
+  if (!entry) {
+    entry = { name: name || "", points: 0, wins: 0, games: 0 };
+    scoreboard.set(deviceId, entry);
+  }
+  if (name) {
+    entry.name = name;
+  }
+  return entry;
+}
 
 function awardPoints(player, amount) {
-  const owner = clients.clientForPlayerId(player.id);
+  const owner = clientForPlayerId(player.id);
   if (!owner) {
     return;
   }
-  scoreStore.award(owner.deviceId, clients.clientLabel(owner), amount);
+  getScoreEntry(owner.deviceId, clientLabel(owner)).points += amount;
+  scoresDirty = true;
 }
 
 function pointsForPlayer(player) {
-  const owner = clients.clientForPlayerId(player.id);
+  const owner = clientForPlayerId(player.id);
   if (!owner) {
     return 0;
   }
-  return scoreStore.pointsForDevice(owner.deviceId);
+  const entry = scoreboard.get(owner.deviceId);
+  return entry ? entry.points : 0;
+}
+
+function flushScores() {
+  if (!scoresDirty) {
+    return;
+  }
+  scoresDirty = false;
+  const data = Array.from(scoreboard.entries()).map(([deviceId, entry]) => ({
+    deviceId,
+    name: entry.name,
+    points: entry.points,
+    wins: entry.wins,
+    games: entry.games
+  }));
+  fs.writeFile(scoresFilePath, JSON.stringify(data, null, 2), () => {});
+}
+
+function buildScoreboard() {
+  return Array.from(scoreboard.values())
+    .filter((entry) => entry.games > 0 || entry.points > 0)
+    .sort((a, b) => b.points - a.points || b.wins - a.wins)
+    .slice(0, 10)
+    .map((entry) => ({
+      name: entry.name || "Anonyme",
+      points: entry.points,
+      wins: entry.wins,
+      games: entry.games
+    }));
 }
 
 socket.on("message", (buffer, remote) => {
-  if (DEBUG_UDP) {
-    console.log(`[udp] ${remote.address}:${remote.port} ${buffer.toString("utf8")}`);
-  }
-
   let envelope;
   try {
     envelope = JSON.parse(buffer.toString("utf8"));
-  } catch (error) {
-    if (DEBUG_UDP) {
-      console.log(`[udp] rejected invalid json: ${error.message}`);
-    }
+  } catch {
     return;
   }
 
   const payload = envelope.payload || envelope;
-  const deviceId = clients.sanitizeId(envelope.deviceId || payload.deviceId || "");
-  const deviceName = clients.sanitizeDeviceName(envelope.deviceName || payload.deviceName || "");
+  const deviceId = sanitizeId(envelope.deviceId || payload.deviceId || "");
+  const deviceName = sanitizeDeviceName(envelope.deviceName || payload.deviceName || "");
   if (!deviceId) {
-    if (DEBUG_UDP) {
-      console.log("[udp] rejected packet without deviceId");
-    }
     return;
   }
 
-  const client = clients.registerClient(deviceId, deviceName, remote);
+  const client = registerClient(deviceId, deviceName, remote);
 
-  const displayName = clients.sanitizeDeviceName(envelope.displayName || payload.displayName || "");
+  const displayName = sanitizeDeviceName(envelope.displayName || payload.displayName || "");
   if (displayName) {
     client.displayName = displayName;
   }
   // Unicité des couleurs : on n'applique une couleur demandée que si aucun autre
   // joueur connecté ne l'utilise déjà (sinon on garde l'actuelle).
-  const requestedColor = clients.sanitizeColor(envelope.color || payload.color || "");
-  if (!requestedColor || !clients.isColorTakenByOther(requestedColor, client)) {
+  const requestedColor = sanitizeColor(envelope.color || payload.color || "");
+  if (!requestedColor || !isColorTakenByOther(requestedColor, client)) {
     client.color = requestedColor;
   }
 
@@ -153,7 +198,7 @@ socket.on("message", (buffer, remote) => {
     if (client.spectator || client.playerId <= 0) {
       return;
     }
-    client.input = circleMath.clamp(Number(payload.direction) || 0, -1, 1);
+    client.input = clamp(Number(payload.direction) || 0, -1, 1);
     client.lastSeen = Date.now();
     return;
   }
@@ -172,6 +217,12 @@ socket.on("message", (buffer, remote) => {
 
   if (payload.type === "lobby") {
     returnToLobby();
+    broadcastSnapshot();
+    return;
+  }
+
+  if (payload.type === "race") {
+    handleRaceAction(client);
     broadcastSnapshot();
   }
 });
@@ -200,26 +251,102 @@ http.createServer((req, res) => {
     udpPort: UDP_PORT,
     connectedPlayerCount: game.connectedPlayerCount,
     readyPlayerCount: game.readyPlayerCount,
-    spectatorCount: clients.countSpectators(),
+    spectatorCount: countSpectators(),
     playerCount: game.playerCount,
     lobbyOpen: game.lobbyOpen,
     gameStarted: game.gameStarted,
     gameOver: game.gameOver,
     winnerId: game.winnerId,
     status: game.status,
-    devices: snapshots.buildDeviceList(),
-    lobbyDevices: snapshots.buildLobbyDeviceList(),
-    scoreboard: scoreStore.buildScoreboard()
+    devices: buildDeviceList(),
+    lobbyDevices: buildLobbyDeviceList(),
+    scoreboard: buildScoreboard()
   }));
 }).listen(HEALTH_PORT, "0.0.0.0");
 
+function registerClient(deviceId, deviceName, remote) {
+  const addressKey = `${remote.address}:${remote.port}`;
+  let client = clientsByDevice.get(deviceId);
+
+  if (!client) {
+    client = {
+      id: nextClientId++,
+      deviceId,
+      deviceName: deviceName || "Device",
+      displayName: "",
+      color: "",
+      address: remote.address,
+      port: remote.port,
+      playerId: 0,
+      ready: false,
+      spectator: false,
+      input: 0,
+      wantsReplay: false,
+      lastSeen: Date.now()
+    };
+    clientsByDevice.set(deviceId, client);
+  }
+
+  client.deviceName = getUniqueDeviceName(deviceName || client.deviceName, client);
+  client.address = remote.address;
+  client.port = remote.port;
+  client.lastSeen = Date.now();
+  clientsByAddress.set(addressKey, client);
+  updateStatus();
+  return client;
+}
+
+function sanitizeId(value) {
+  return String(value || "").replace(/[^\w.-]/g, "").slice(0, 80);
+}
+
+function getUniqueDeviceName(deviceName, currentClient) {
+  const baseName = sanitizeDeviceName(deviceName) || "Device";
+  let sameTypeCount = 0;
+
+  for (const client of clientsByDevice.values()) {
+    if (client !== currentClient && sanitizeDeviceName(client.deviceName) === baseName) {
+      sameTypeCount++;
+    }
+  }
+
+  return sameTypeCount > 0 ? `${baseName} ${sameTypeCount + 1}` : baseName;
+}
+
+function sanitizeDeviceName(deviceName) {
+  return String(deviceName || "")
+    .replace(/[^\w .-]/g, "")
+    .trim()
+    .slice(0, 24);
+}
+
+function sanitizeColor(value) {
+  return String(value || "").replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
+}
+
 // Vrai si un autre joueur connecté utilise déjà cette couleur (comparaison insensible à la casse).
+function isColorTakenByOther(color, self) {
+  const target = color.toLowerCase();
+  for (const client of getConnectedClients()) {
+    if (client !== self && !client.spectator && client.color && client.color.toLowerCase() === target) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function clientLabel(client) {
+  return client.displayName && client.displayName.length > 0
+    ? client.displayName
+    : (client.deviceName || "Device");
+}
+
 function joinGame(client) {
   if (!client || game.gameOver) {
     return;
   }
 
-  if (client.playerId <= 0 && clients.getReadyClients().length >= maximumPlayers) {
+  if (client.playerId <= 0 && getReadyClients().length >= maximumPlayers) {
     return;
   }
 
@@ -260,7 +387,7 @@ function spectateGame(client) {
 }
 
 function addReadyPlayerToRunningGame() {
-  const activeClients = clients.getReadyClients();
+  const activeClients = getReadyClients();
   const previousPlayerCount = game.players.length;
   activeClients.forEach((readyClient, index) => {
     readyClient.playerId = index + 1;
@@ -318,7 +445,7 @@ function returnToLobby() {
 }
 
 function assignLobbyPlayers() {
-  const readyClients = clients.getReadyClients();
+  const readyClients = getReadyClients();
 
   for (const client of clientsByDevice.values()) {
     client.playerId = 0;
@@ -364,15 +491,26 @@ function beginMatch() {
 
   // Score persistant
   for (const player of game.players) {
-    const owner = clients.clientForPlayerId(player.id);
+    const owner = clientForPlayerId(player.id);
     if (owner) {
-      scoreStore.recordGame(owner.deviceId, clients.clientLabel(owner));
+      getScoreEntry(owner.deviceId, clientLabel(owner)).games += 1;
+      scoresDirty = true;
     }
   }
 
   redistributeAlivePlayers();
   resetBall();
   updateStatus();
+}
+
+function getConnectedClients() {
+  return Array.from(clientsByDevice.values())
+    .filter((client) => Date.now() - client.lastSeen <= clientTimeoutMs)
+    .sort((a, b) => a.id - b.id);
+}
+
+function getReadyClients() {
+  return getConnectedClients().filter((client) => client.ready && !client.spectator).slice(0, maximumPlayers);
 }
 
 function rebuildPlayersForReadyClients(readyClients, preserveExistingPlayers) {
@@ -417,18 +555,71 @@ function voteReplay(client) {
   updatePostGameStatus();
 }
 
+function updateRace(now) {
+  const race = game.race;
+  if (!game.gameStarted || game.gameOver) {
+    race.active = false;
+    race.winnerId = 0;
+    race.winnerName = "";
+    race.nextRaceTime = 0;
+    race.winnerDisplayDeadline = 0;
+    return;
+  }
+
+  if (race.winnerId > 0) {
+    if (now >= race.winnerDisplayDeadline) {
+      race.winnerId = 0;
+      race.winnerName = "";
+      race.nextRaceTime = now + raceIntervalMs;
+    }
+    return;
+  }
+
+  if (race.nextRaceTime === 0) {
+    race.nextRaceTime = now + raceIntervalMs;
+    return;
+  }
+
+  if (!race.active && now >= race.nextRaceTime) {
+    race.active = true;
+    race.deadline = now + raceDurationMs;
+    return;
+  }
+
+  if (race.active && now >= race.deadline) {
+    race.active = false;
+    race.nextRaceTime = now + raceIntervalMs;
+  }
+}
+
+function handleRaceAction(client) {
+  const race = game.race;
+  if (!race.active || race.winnerId > 0) return;
+  const player = game.players.find((p) => clientForPlayerId(p.id) === client);
+  if (!player?.alive) return;
+
+  race.active = false;
+  race.winnerId = player.id;
+  race.winnerName = clientLabel(client);
+  race.winnerDisplayDeadline = Date.now() + raceWinnerDisplayMs;
+  race.nextRaceTime = race.winnerDisplayDeadline + raceIntervalMs;
+  awardPoints(player, raceBonusPoints);
+  flushScores();
+}
+
 function tick() {
   const now = Date.now();
   const deltaTime = Math.min(0.05, (now - lastTick) / 1000);
   lastTick = now;
 
-  clients.cleanupClients();
+  cleanupClients();
   reconcileGameState();
   updateStartCountdown();
   updateInputs();
   updatePostGameTimeout();
   updatePaddles(deltaTime);
   updateBall(deltaTime);
+  updateRace(now);
 }
 
 
@@ -438,7 +629,7 @@ function updateStartCountdown() {
     return;
   }
 
-  const readyCount = clients.getReadyClients().length;
+  const readyCount = getReadyClients().length;
   if (!game.lobbyOpen || readyCount < minimumPlayers) {
     game.startDeadline = 0;
     return;
@@ -461,12 +652,21 @@ function updateStartCountdown() {
   updateStatus();
 }
 
+function cleanupClients() {
+  const now = Date.now();
+  for (const [deviceId, client] of clientsByDevice.entries()) {
+    if (now - client.lastSeen > clientTimeoutMs) {
+      clientsByDevice.delete(deviceId);
+    }
+  }
+}
+
 function reconcileGameState() {
   if (game.gameOver) {
     return;
   }
 
-  const readyClients = clients.getReadyClients();
+  const readyClients = getReadyClients();
   if (!game.gameStarted && readyClients.length >= minimumPlayers) {
     game.lobbyOpen = true;
     assignLobbyPlayers();
@@ -539,7 +739,7 @@ function updatePaddles(deltaTime) {
     }
 
     player.paddleAngle += player.input * paddleAngularSpeed * deltaTime;
-    player.paddleAngle = circleMath.clampPaddleAngle(player.paddleAngle, player.sectorStartAngle, player.sectorEndAngle, paddleArcDegrees);
+    player.paddleAngle = clampPaddleAngle(player.paddleAngle, player.sectorStartAngle, player.sectorEndAngle);
   }
 }
 
@@ -556,14 +756,14 @@ function updateBall(deltaTime) {
     return;
   }
 
-  const angle = circleMath.directionToAngle(game.ballX, game.ballY);
+  const angle = directionToAngle(game.ballX, game.ballY);
   const defender = findPlayerAtAngle(angle);
   if (!defender || !defender.alive) {
     resetBall();
     return;
   }
 
-  const paddleDelta = Math.abs(circleMath.deltaAngle(angle, defender.paddleAngle));
+  const paddleDelta = Math.abs(deltaAngle(angle, defender.paddleAngle));
   if (paddleDelta <= paddleArcDegrees * 0.5) {
     bounceOnPaddle(defender, angle);
   } else {
@@ -622,7 +822,11 @@ function countInGameDevices() {
 }
 
 function countReadyDevices() {
-  return Math.min(clients.getConnectedClients().filter((client) => client.ready).length, maximumPlayers);
+  return Math.min(getConnectedClients().filter((client) => client.ready && !client.spectator).length, maximumPlayers);
+}
+
+function countSpectators() {
+  return getConnectedClients().filter((client) => client.spectator).length;
 }
 
 function countReplayVotes() {
@@ -636,15 +840,31 @@ function countReplayVotes() {
 }
 
 function bounceOnPaddle(defender, impactAngle) {
-  const impactDirection = circleMath.angleToDirection(impactAngle);
-  const nextDirection = ballRules.calculateBounceDirection(
-    { x: game.ballDirX, y: game.ballDirY },
-    defender.paddleAngle,
-    impactAngle,
-    paddleArcDegrees,
-    paddleAimInfluence);
-  game.ballDirX = nextDirection.x;
-  game.ballDirY = nextDirection.y;
+  const impactDirection = angleToDirection(impactAngle);
+  const paddleDirection = angleToDirection(defender.paddleAngle);
+  const dot = game.ballDirX * paddleDirection.x + game.ballDirY * paddleDirection.y;
+  let reflectedX = game.ballDirX - 2 * dot * paddleDirection.x;
+  let reflectedY = game.ballDirY - 2 * dot * paddleDirection.y;
+
+  const offset = deltaAngle(defender.paddleAngle, impactAngle) / Math.max(1, paddleArcDegrees * 0.5);
+  const tangent = { x: -paddleDirection.y, y: paddleDirection.x };
+  let aimedX = reflectedX + tangent.x * offset * paddleAimInfluence;
+  let aimedY = reflectedY + tangent.y * offset * paddleAimInfluence;
+  let length = Math.hypot(aimedX, aimedY) || 1;
+  aimedX /= length;
+  aimedY /= length;
+
+  const antiImpactDot = aimedX * -impactDirection.x + aimedY * -impactDirection.y;
+  if (antiImpactDot < 0.15) {
+    aimedX = lerp(aimedX, -impactDirection.x, 0.5);
+    aimedY = lerp(aimedY, -impactDirection.y, 0.5);
+    length = Math.hypot(aimedX, aimedY) || 1;
+    aimedX /= length;
+    aimedY /= length;
+  }
+
+  game.ballDirX = aimedX;
+  game.ballDirY = aimedY;
   game.ballX = impactDirection.x * (arenaRadius - 0.12);
   game.ballY = impactDirection.y * (arenaRadius - 0.12);
 }
@@ -666,9 +886,10 @@ function eliminatePlayer(player) {
     game.winnerId = winner ? winner.id : 0;
     if (winner) {
       awardPoints(winner, winBonusPoints);
-      const owner = clients.clientForPlayerId(winner.id);
+      const owner = clientForPlayerId(winner.id);
       if (owner) {
-        scoreStore.recordWin(owner.deviceId, clients.clientLabel(owner));
+        getScoreEntry(owner.deviceId, clientLabel(owner)).wins += 1;
+        scoresDirty = true;
       }
     }
     game.gameOver = true;
@@ -679,7 +900,7 @@ function eliminatePlayer(player) {
     for (const client of clientsByDevice.values()) {
       client.wantsReplay = false;
     }
-    scoreStore.flush();
+    flushScores();
     updatePostGameStatus();
     return;
   }
@@ -716,29 +937,148 @@ function redistributeAlivePlayers() {
       player.paddleAngle = sectorCenter;
       player.hasPaddleAngle = true;
     } else {
-    player.paddleAngle = circleMath.clampPaddleAngle(player.paddleAngle, player.sectorStartAngle, player.sectorEndAngle, paddleArcDegrees);
+      player.paddleAngle = clampPaddleAngle(player.paddleAngle, player.sectorStartAngle, player.sectorEndAngle);
     }
   });
 }
 
 function findPlayerAtAngle(angle) {
-  return game.players.find((player) => circleMath.angleInsideSector(angle, player.sectorStartAngle, player.sectorEndAngle));
+  return game.players.find((player) => angleInsideSector(angle, player.sectorStartAngle, player.sectorEndAngle));
+}
+
+function angleInsideSector(angle, startAngle, endAngle) {
+  const center = lerpAngle(startAngle, endAngle, 0.5);
+  const halfSize = Math.abs(deltaAngle(startAngle, endAngle)) * 0.5;
+  return Math.abs(deltaAngle(center, angle)) <= halfSize;
 }
 
 function resetBall() {
   game.ballX = 0;
   game.ballY = 0;
-  const direction = ballRules.randomDirection();
+  const angle = Math.random() * 360;
+  const direction = angleToDirection(angle);
   game.ballDirX = direction.x;
   game.ballDirY = direction.y;
 }
 
 
+function buildSnapshot(client, full = true) {
+  const alivePlayerCount = game.players.filter((player) => player.alive).length;
+  const snapshot = {
+    type: "state",
+    localPlayerId: client && !client.spectator ? client.playerId : 0,
+    localIsSpectator: !!(client && client.spectator),
+    lobbyOpen: game.lobbyOpen,
+    connectedPlayerCount: countInGameDevices(),
+    readyPlayerCount: countReadyDevices(),
+    spectatorCount: countSpectators(),
+    playerCount: Math.max(minimumPlayers, Math.min(maximumPlayers, game.players.length)),
+    alivePlayerCount,
+    winnerId: game.winnerId,
+    gameStarted: game.gameStarted,
+    gameOver: game.gameOver,
+    replayVoteCount: game.replayVoteCount,
+    postGameRemainingSeconds: game.gameOver && game.postGameDeadline > 0
+      ? Math.max(0, Math.ceil((game.postGameDeadline - Date.now()) / 1000))
+      : 0,
+    startCountdownSeconds: (!game.gameStarted && !game.gameOver && game.startDeadline > 0)
+      ? Math.max(0, Math.ceil((game.startDeadline - Date.now()) / 1000))
+      : 0,
+    ballX: round(game.ballX),
+    ballY: round(game.ballY),
+    ballDirX: round(game.ballDirX),
+    ballDirY: round(game.ballDirY),
+    raceActive: game.race.active,
+    raceWinnerId: game.race.winnerId,
+    raceWinnerName: game.race.winnerName,
+    raceRemainingMs: game.race.active ? Math.max(0, game.race.deadline - Date.now()) : 0,
+    players: game.players.map((player) => {
+      const owner = clientForPlayerId(player.id);
+      return {
+        id: player.id,
+        alive: player.alive,
+        lives: player.lives,
+        points: pointsForPlayer(player),
+        paddleAngle: round(player.paddleAngle),
+        input: round(player.input || 0),
+        name: full && owner ? clientLabel(owner) : "",
+        color: full && owner ? owner.color : ""
+      };
+    })
+  };
+
+  if (full) {
+    snapshot.status = game.status;
+    snapshot.devices = buildDeviceList();
+    snapshot.lobbyDevices = buildLobbyDeviceList();
+  }
+
+  return snapshot;
+}
+
+function metaSignature() {
+  const devs = buildDeviceList()
+    .map((d) => d.playerId + ":" + d.name + ":" + d.ready + ":" + d.color + ":" + d.lives + ":" + d.points)
+    .join("|");
+  const lobby = buildLobbyDeviceList()
+    .map((d) => d.name + ":" + d.color + ":" + d.spectator)
+    .join("|");
+  const identities = game.players
+    .map((p) => {
+      const owner = clientForPlayerId(p.id);
+      return p.id + ":" + (owner ? clientLabel(owner) : "") + ":" + (owner ? owner.color : "");
+    })
+    .join("|");
+  return devs + "#" + lobby + "#" + identities + "#" + game.status
+    + "#" + game.lobbyOpen + game.gameStarted + game.gameOver + game.winnerId;
+}
+
+function clientForPlayerId(playerId) {
+  for (const client of clientsByDevice.values()) {
+    if (client.playerId === playerId) {
+      return client;
+    }
+  }
+  return null;
+}
+
+function buildDeviceList() {
+  return Array.from(clientsByDevice.values())
+    .filter((client) => client.ready && client.playerId > 0)
+    .sort((a, b) => a.playerId - b.playerId)
+    .map((client) => {
+      const player = game.players[client.playerId - 1];
+      const entry = scoreboard.get(client.deviceId);
+      return {
+        playerId: client.playerId,
+        name: clientLabel(client),
+        ready: client.ready,
+        spectator: false,
+        color: client.color,
+        lives: player ? player.lives : 0,
+        points: entry ? entry.points : 0
+      };
+    });
+}
+
+function buildLobbyDeviceList() {
+  return Array.from(clientsByDevice.values())
+    .filter((client) => !client.ready || client.playerId <= 0)
+    .sort((a, b) => a.id - b.id)
+    .map((client) => ({
+      playerId: 0,
+      name: clientLabel(client),
+      ready: false,
+      spectator: !!client.spectator,
+      color: client.color
+    }));
+}
+
 let lastMetaSignature = "";
 let lastFullBroadcastTime = 0;
 
 function broadcastSnapshot() {
-  const signature = snapshots.metaSignature();
+  const signature = metaSignature();
   const now = Date.now();
   const full = signature !== lastMetaSignature || (now - lastFullBroadcastTime) >= 1000;
   if (full) {
@@ -752,11 +1092,57 @@ function broadcastSnapshot() {
 }
 
 function sendSnapshot(client, full = true) {
-  const message = Buffer.from(JSON.stringify(snapshots.buildSnapshot(client, full)));
+  const message = Buffer.from(JSON.stringify(buildSnapshot(client, full)));
   socket.send(message, client.port, client.address);
+}
+
+function angleToDirection(angle) {
+  const radians = angle * Math.PI / 180;
+  return { x: Math.cos(radians), y: Math.sin(radians) };
+}
+
+function directionToAngle(x, y) {
+  const angle = Math.atan2(y, x) * 180 / Math.PI;
+  return angle < 0 ? angle + 360 : angle;
+}
+
+function clampPaddleAngle(angle, startAngle, endAngle) {
+  const center = lerpAngle(startAngle, endAngle, 0.5);
+  const sectorHalfSize = Math.abs(deltaAngle(startAngle, endAngle)) * 0.5;
+  const allowedHalfSize = Math.max(0, sectorHalfSize - paddleArcDegrees * 0.5);
+  const delta = clamp(deltaAngle(center, angle), -allowedHalfSize, allowedHalfSize);
+  return center + delta;
+}
+
+function lerpAngle(a, b, t) {
+  return a + deltaAngle(a, b) * t;
+}
+
+function deltaAngle(current, target) {
+  let delta = repeat((target - current), 360);
+  if (delta > 180) {
+    delta -= 360;
+  }
+  return delta;
+}
+
+function repeat(value, length) {
+  return clamp(value - Math.floor(value / length) * length, 0, length);
+}
+
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function lerp(a, b, t) {
+  return a + (b - a) * t;
+}
+
+function round(value) {
+  return Math.round(value * 1000) / 1000;
 }
 
 assignLobbyPlayers();
 setInterval(tick, 1000 / 60);
 setInterval(broadcastSnapshot, 1000 / 30);
-setInterval(scoreStore.flush, 5000);
+setInterval(flushScores, 5000);

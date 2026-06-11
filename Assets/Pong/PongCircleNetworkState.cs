@@ -23,6 +23,10 @@ public class PongCircleNetworkSnapshot
     public float ballY;
     public float ballDirX;
     public float ballDirY;
+    public bool raceActive;
+    public int raceWinnerId;
+    public string raceWinnerName;
+    public int raceRemainingMs;
     public PongCircleNetworkDeviceState[] devices;
     public PongCircleNetworkDeviceState[] lobbyDevices;
     public PongCircleNetworkPlayerState[] players;
@@ -46,6 +50,7 @@ public class PongCircleNetworkPlayerState
     public int id;
     public bool alive;
     public float paddleAngle;
+    public float input;
     public string name;
     public string color;
     public int lives;

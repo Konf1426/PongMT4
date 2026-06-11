@@ -14,6 +14,7 @@ using UnityEngine.UIElements;
 /// </summary>
 public static class PongLaunchSetup
 {
+
     const string UiFolder = "Assets/Pong/UI";
     const string ScenesFolder = "Assets/Pong/Scenes";
 

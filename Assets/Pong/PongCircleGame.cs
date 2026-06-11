@@ -927,6 +927,12 @@ public class PongCircleGame : MonoBehaviour
       return infos;
     }
 
+    public int GetPlayerPoints(int id)
+    {
+      CirclePlayer player = FindPlayerById(id);
+      return player != null ? player.Points : 0;
+    }
+
     public string GetPlayerName(int id) {
       foreach (CirclePlayer player in players) {
         if (player.Id == id) {

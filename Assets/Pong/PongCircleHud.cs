@@ -438,14 +438,8 @@ public class PongCircleHud : MonoBehaviour
         if (!showStats) return;
 
         PongCircleNetworkDeviceState local = FindDeviceByPlayerId(localId);
-        if (local != null)
-        {
-            SetText(hudLocalStats, "P" + localId + "   Vies : " + local.lives + "   Points : " + local.points);
-        }
-        else
-        {
-            SetText(hudLocalStats, "P" + localId + "   Vies : -   Points : -");
-        }
+        string lives = local != null ? local.lives.ToString() : "-";
+        SetText(hudLocalStats, "P" + localId + "   Vies : " + lives + "   Points : " + Game.GetPlayerPoints(localId));
     }
 
     void RefreshRace()

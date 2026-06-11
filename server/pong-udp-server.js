@@ -60,6 +60,7 @@ const game = {
   ballSpeedMul: 1,
   ballDeadly: false,
   nextDeadlyTime: 0,
+  lastHitPlayerId: 0,
   status: "Waiting for someone to start a game",
   race: {
     active: false,
@@ -524,6 +525,7 @@ function beginMatch() {
     player.lives = startingLives;
     player.gamePoints = 0;
   }
+  game.lastHitPlayerId = 0;
 
   for (const client of clientsByDevice.values()) {
     client.wantsReplay = false;
@@ -864,6 +866,12 @@ function updateBall(deltaTime) {
 function concedeGoal(defender) {
   defender.lives -= 1;
 
+  const scorer = game.lastHitPlayerId > 0 && game.lastHitPlayerId !== defender.id
+    ? game.players.find((p) => p.id === game.lastHitPlayerId && p.alive)
+    : null;
+  if (scorer) scorer.gamePoints = (scorer.gamePoints || 0) + 1;
+  game.lastHitPlayerId = 0;
+
   if (defender.lives <= 0) {
     eliminatePlayer(defender);
     return;
@@ -928,7 +936,7 @@ function countReplayVotes() {
 }
 
 function bounceOnPaddle(defender, impactAngle) {
-  defender.gamePoints = (defender.gamePoints || 0) + 1;
+  game.lastHitPlayerId = defender.id;
   const impactDirection = angleToDirection(impactAngle); // radial sortant au point d'impact
   const inwardX = -impactDirection.x;
   const inwardY = -impactDirection.y;
@@ -1043,6 +1051,7 @@ function resetBall() {
   game.ballDirY = direction.y;
   game.ballSpeedMul = 1;
   game.ballDeadly = false;
+  game.lastHitPlayerId = 0;
 }
 
 

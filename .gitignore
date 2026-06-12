@@ -1,13 +1,57 @@
+# ─── Dossiers générés par Unity (ne jamais committer) ───
+/[Ll]ibrary/
+/[Tt]emp/
+/[Oo]bj/
+/[Bb]uild/
+/[Bb]uilds/
+/build-web/
+/launcher/Game/
+/[Ll]ogs/
+/[Ll]og/
+/[Uu]serSettings/
+/[Mm]emoryCaptures/
+/[Rr]ecordings/
+
+# ─── Règle importante : un .meta n'est ignoré QUE si son asset l'est aussi ───
+# (sans ça, Unity perd les références entre fichiers)
+!/[Aa]ssets/**/*.meta
+
+# ─── IDE / éditeurs ───
 /.vscode/
-/Library/
-/obj/
+/.vs/
+.idea/
 *.csproj
 *.sln
-/Temp/
-/.vs/
-/Log/
-/Logs/
-/Build/
-*.0.2.zip
+*.user
+*.userprefs
+*.unityproj
+*.booproj
+*.suo
+*.pidb
+*.pdb
+*.mdb
+*.opendb
+*.VC.db
+
+# ─── Fichiers de build / packages ───
+*.apk
+*.aab
+*.app
+*.unitypackage
 *.zip
-/UserSettings/
+
+# ─── Système d'exploitation ───
+.DS_Store
+.DS_Store?
+Thumbs.db
+
+# ─── Crashlytics ───
+crashlytics-build.properties
+
+# ─── Addressables (assets packés générés) ───
+/[Aa]ssets/[Aa]ddressable[Aa]ssetsData/*/*.bin*
+/[Aa]ssets/[Ss]treamingAssets/aa.meta
+/[Aa]ssets/[Ss]treamingAssets/aa/*
+
+# ─── Données runtime du serveur (scores persistants) ───
+/server/scores.json

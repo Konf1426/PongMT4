@@ -1,0 +1,4 @@
+@import url("unity-theme://default");
+
+/* Thème runtime du projet Pong. Hérite du thème Unity par défaut puis
+   applique des réglages globaux. Étendre ici pour HUD / écrans suivants. */

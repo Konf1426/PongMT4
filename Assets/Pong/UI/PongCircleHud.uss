@@ -1,0 +1,369 @@
+/* HUD Circle Pong — UI Toolkit (cohérent avec le menu titre) */
+
+.hud-root {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+}
+
+/* Cartes — cachées par défaut, le contrôleur affiche l'écran actif (évite la
+   superposition des 5 panneaux en mode édition et tout flash au lancement). */
+.card {
+    display: none;
+    position: absolute;
+    background-color: rgba(11, 15, 20, 0.97);
+    border-radius: 16px;
+    border-width: 1px;
+    border-color: rgba(88, 230, 200, 0.30);
+    padding-top: 26px;
+    padding-bottom: 26px;
+    padding-left: 30px;
+    padding-right: 30px;
+}
+
+.card--center {
+    left: 50%;
+    top: 50%;
+    translate: -50% -50%;
+    width: 560px;
+    align-items: stretch;
+}
+
+.card--topleft {
+    left: 16px;
+    top: 16px;
+    width: 320px;
+}
+
+.card-title {
+    font-size: 42px;
+    -unity-font-style: bold;
+    color: rgb(88, 230, 200);
+    -unity-text-align: middle-center;
+    margin-bottom: 2px;
+}
+
+.card-title--small {
+    font-size: 22px;
+    -unity-text-align: upper-left;
+    margin-bottom: 8px;
+}
+
+.card-subtitle {
+    font-size: 19px;
+    color: rgb(150, 170, 185);
+    -unity-text-align: middle-center;
+    margin-bottom: 18px;
+}
+
+/* Boutons */
+.primary-button {
+    height: 58px;
+    margin-top: 10px;
+    margin-bottom: 10px;
+    font-size: 21px;
+    -unity-font-style: bold;
+    color: rgb(13, 17, 23);
+    background-color: rgb(88, 230, 200);
+    border-width: 0;
+    border-radius: 10px;
+    transition-property: background-color, scale;
+    transition-duration: 0.12s;
+}
+
+.primary-button:hover {
+    background-color: rgb(120, 245, 215);
+    scale: 1.02 1.02;
+}
+
+.primary-button:active {
+    scale: 0.98 0.98;
+}
+
+.secondary-button {
+    height: 40px;
+    margin-top: 6px;
+    margin-bottom: 6px;
+    font-size: 15px;
+    color: rgb(200, 215, 225);
+    background-color: rgba(255, 255, 255, 0.06);
+    border-width: 1px;
+    border-color: rgb(60, 72, 84);
+    border-radius: 8px;
+}
+
+.secondary-button:hover {
+    background-color: rgba(255, 255, 255, 0.12);
+}
+
+/* Texte */
+.info {
+    font-size: 19px;
+    color: rgb(214, 226, 235);
+    margin-top: 4px;
+    margin-bottom: 4px;
+}
+
+.info--accent {
+    color: rgb(88, 230, 200);
+    -unity-font-style: bold;
+}
+
+.local-stats {
+    font-size: 20px;
+    -unity-font-style: bold;
+    color: rgb(13, 17, 23);
+    background-color: rgb(88, 230, 200);
+    border-radius: 8px;
+    padding-top: 8px;
+    padding-bottom: 8px;
+    padding-left: 10px;
+    padding-right: 10px;
+    margin-top: 4px;
+    margin-bottom: 10px;
+    -unity-text-align: middle-center;
+}
+
+.hint {
+    font-size: 16px;
+    color: rgb(160, 175, 188);
+    white-space: normal;
+    margin-top: 14px;
+}
+
+/* Bloc identité (nom + couleur) sur l'écran d'entrée */
+.identity {
+    margin-top: 4px;
+    margin-bottom: 8px;
+}
+
+.field-label {
+    font-size: 19px;
+    -unity-font-style: bold;
+    color: rgb(190, 205, 217);
+    margin-top: 14px;
+    margin-bottom: 7px;
+}
+
+.name-field {
+    min-height: 44px;
+    font-size: 20px;
+    margin-bottom: 6px;
+}
+
+.name-field > #unity-text-input {
+    min-height: 44px;
+    font-size: 20px;
+    padding-left: 10px;
+    padding-right: 10px;
+    color: rgb(20, 24, 30);
+}
+
+.color-row {
+    flex-direction: row;
+    flex-wrap: wrap;
+}
+
+.color-swatch {
+    width: 36px;
+    height: 36px;
+    margin-right: 10px;
+    margin-bottom: 8px;
+    border-radius: 8px;
+    border-width: 2px;
+    border-color: rgba(255, 255, 255, 0.15);
+    padding: 0;
+}
+
+.color-swatch:hover {
+    border-color: rgba(255, 255, 255, 0.5);
+}
+
+.color-swatch--selected {
+    border-color: rgb(255, 255, 255);
+    scale: 1.12 1.12;
+}
+
+/* Lobby local */
+.row {
+    flex-direction: row;
+    align-items: center;
+    margin-top: 6px;
+    margin-bottom: 6px;
+}
+
+.row-label {
+    font-size: 14px;
+    color: rgb(200, 215, 225);
+    width: 60px;
+}
+
+.count-field {
+    width: 48px;
+}
+
+.mini-button {
+    width: 34px;
+    height: 26px;
+    margin-left: 4px;
+    font-size: 14px;
+    background-color: rgba(255, 255, 255, 0.08);
+    color: rgb(220, 228, 235);
+    border-width: 1px;
+    border-color: rgb(60, 72, 84);
+    border-radius: 6px;
+}
+
+.mini-button:hover {
+    background-color: rgba(255, 255, 255, 0.16);
+}
+
+.toggle {
+    margin-top: 6px;
+    margin-bottom: 6px;
+    color: rgb(200, 215, 225);
+}
+
+/* Listes de devices réseau */
+.device-list {
+    margin-top: 4px;
+}
+
+.device-header {
+    font-size: 16px;
+    -unity-font-style: bold;
+    color: rgb(165, 185, 200);
+    margin-top: 8px;
+}
+
+.device-item {
+    font-size: 16px;
+    color: rgb(205, 218, 228);
+    margin-left: 8px;
+    margin-top: 2px;
+}
+
+/* Contrôles tactiles */
+.controls-help {
+    display: none;
+    position: absolute;
+    right: 18px;
+    bottom: 18px;
+    width: 260px;
+    background-color: rgba(11, 15, 20, 0.84);
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: rgba(88, 230, 200, 0.28);
+    padding-top: 12px;
+    padding-bottom: 12px;
+    padding-left: 14px;
+    padding-right: 14px;
+}
+
+.controls-title {
+    font-size: 15px;
+    -unity-font-style: bold;
+    color: rgb(88, 230, 200);
+    margin-bottom: 6px;
+}
+
+.controls-line {
+    font-size: 13px;
+    color: rgb(205, 218, 228);
+    margin-top: 2px;
+    margin-bottom: 2px;
+}
+
+.mobile-bar {
+    display: none;
+    position: absolute;
+    bottom: 24px;
+    left: 0;
+    right: 0;
+    flex-direction: row;
+    justify-content: center;
+}
+
+.mobile-btn {
+    width: 120px;
+    height: 72px;
+    margin-left: 12px;
+    margin-right: 12px;
+    font-size: 34px;
+    -unity-font-style: bold;
+    color: rgb(13, 17, 23);
+    background-color: rgba(88, 230, 200, 0.85);
+    border-width: 0;
+    border-radius: 12px;
+}
+
+.chat-panel {
+    display: none;
+    position: absolute;
+    left: 18px;
+    bottom: 18px;
+    width: 430px;
+    background-color: rgba(11, 15, 20, 0.88);
+    border-radius: 8px;
+    border-width: 1px;
+    border-color: rgba(88, 230, 200, 0.28);
+    padding-top: 12px;
+    padding-bottom: 12px;
+    padding-left: 14px;
+    padding-right: 14px;
+}
+
+.chat-title {
+    font-size: 20px;
+    -unity-font-style: bold;
+    color: rgb(88, 230, 200);
+    margin-bottom: 10px;
+}
+
+.chat-scroll {
+    height: 170px;
+    margin-bottom: 8px;
+    flex-shrink: 0;
+}
+
+.chat-messages {
+    flex-grow: 1;
+}
+
+.chat-empty {
+    font-size: 16px;
+    color: rgb(150, 170, 185);
+}
+
+.chat-line {
+    font-size: 16px;
+    color: rgb(214, 226, 235);
+    white-space: normal;
+    margin-top: 3px;
+    margin-bottom: 3px;
+}
+
+.chat-row {
+    flex-direction: row;
+    align-items: center;
+    flex-shrink: 0;
+}
+
+.chat-input {
+    flex-grow: 1;
+    min-height: 40px;
+    margin-right: 10px;
+}
+
+.chat-input > #unity-text-input {
+    min-height: 40px;
+    font-size: 16px;
+    color: rgb(20, 24, 30);
+}
+
+.chat-send {
+    width: 92px;
+    height: 40px;
+}

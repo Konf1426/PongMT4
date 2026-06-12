@@ -9,10 +9,11 @@ function createSnapshotBuilder(options) {
     countReadyDevices,
     countSpectators,
     game,
+    lobbyChat,
+    ballSpeed,
     maximumPlayers,
     minimumPlayers,
-    pointsForPlayer,
-    scoreStore
+    pointsForPlayer
   } = options;
 
   function buildSnapshot(client, full = true) {
@@ -41,6 +42,12 @@ function createSnapshotBuilder(options) {
       ballY: circleMath.round(game.ballY),
       ballDirX: circleMath.round(game.ballDirX),
       ballDirY: circleMath.round(game.ballDirY),
+      ballSpeed: circleMath.round(ballSpeed * game.ballSpeedMul),
+      ballDeadly: game.ballDeadly,
+      raceActive: game.race.active,
+      raceWinnerId: game.race.winnerId,
+      raceWinnerName: game.race.winnerName,
+      raceRemainingMs: game.race.active ? Math.max(0, game.race.deadline - Date.now()) : 0,
       players: game.players.map((player) => {
         const owner = clientForPlayerId(player.id);
         return {
@@ -49,11 +56,14 @@ function createSnapshotBuilder(options) {
           lives: player.lives,
           points: pointsForPlayer(player),
           paddleAngle: circleMath.round(player.paddleAngle),
+          input: circleMath.round(player.input || 0),
           name: full && owner ? clientLabel(owner) : "",
           color: full && owner ? owner.color : ""
         };
       })
     };
+
+    snapshot.chat = lobbyChat;
 
     if (full) {
       snapshot.status = game.status;
@@ -77,8 +87,9 @@ function createSnapshotBuilder(options) {
         return player.id + ":" + (owner ? clientLabel(owner) : "") + ":" + (owner ? owner.color : "");
       })
       .join("|");
+    const chat = lobbyChat.length > 0 ? lobbyChat[lobbyChat.length - 1].id : 0;
     return devs + "#" + lobby + "#" + identities + "#" + game.status
-      + "#" + game.lobbyOpen + game.gameStarted + game.gameOver + game.winnerId;
+      + "#" + game.lobbyOpen + game.gameStarted + game.gameOver + game.winnerId + "#" + chat;
   }
 
   function buildDeviceList() {
@@ -94,7 +105,7 @@ function createSnapshotBuilder(options) {
           spectator: false,
           color: client.color,
           lives: player ? player.lives : 0,
-          points: scoreStore.pointsForDevice(client.deviceId)
+          points: player ? player.gamePoints || 0 : 0
         };
       });
   }

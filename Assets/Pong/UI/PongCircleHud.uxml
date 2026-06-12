@@ -14,6 +14,7 @@
                 <ui:VisualElement name="join-colors" class="color-row" />
             </ui:VisualElement>
             <ui:Button text="Jouer / Rejoindre" name="btn-join" class="primary-button" />
+            <ui:Button text="Annuler ma participation" name="btn-cancel-join" class="secondary-button" />
             <ui:Button text="Regarder en spectateur" name="btn-spectate" class="secondary-button" />
             <ui:Label text="" name="join-yourplayer" class="info info--accent" />
             <ui:Label text="" name="join-network" class="info" />
@@ -61,7 +62,7 @@
             <ui:Label text="" name="hud-alive" class="info" />
             <ui:Label text="" name="hud-status" class="info" />
             <ui:Label text="" name="hud-network" class="info" />
-            <ui:Button text="Relancer le lobby" name="btn-restart" class="secondary-button" />
+            <ui:Button text="Retour lobby" name="btn-restart" class="secondary-button" />
             <ui:VisualElement name="hud-devices" class="device-list" />
             <ui:VisualElement name="hud-lobby-devices" class="device-list" />
         </ui:VisualElement>
@@ -80,6 +81,7 @@
         <ui:VisualElement name="panel-eliminated" class="card card--center">
             <ui:Label text="Tu as été éliminé" name="eliminated-title" class="card-title" />
             <ui:Label text="En attente de la fin de la manche…" class="card-subtitle" />
+            <ui:Button text="Retour lobby" name="btn-eliminated-return" class="secondary-button" />
         </ui:VisualElement> 
         
         <!-- Contrôles tactiles -->

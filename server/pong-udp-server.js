@@ -1,7 +1,11 @@
 const dgram = require("dgram");
 const http = require("http");
-const fs = require("fs");
 const path = require("path");
+const ballRules = require("./ball-rules");
+const circleMath = require("./circle-math");
+const { createClientRegistry } = require("./client-registry");
+const { createScoreStore } = require("./score-store");
+const { createSnapshotBuilder } = require("./snapshot-builder");
 
 const UDP_PORT = Number(process.env.UDP_PORT || 41234);
 const HEALTH_PORT = Number(process.env.UDP_HEALTH_PORT || 8082);
@@ -39,8 +43,6 @@ const scoresFilePath = path.join(__dirname, "scores.json");
 
 
 const socket = dgram.createSocket("udp4");
-const clientsByDevice = new Map();
-const clientsByAddress = new Map();
 
 const game = {
   playerCount: minimumPlayers,
@@ -74,55 +76,66 @@ const game = {
   }
 };
 
-let nextClientId = 1;
 let nextChatMessageId = 1;
 let lastTick = Date.now();
 const lobbyChat = [];
 
-const scoreboard = loadScores();
-let scoresDirty = false;
-
-function loadScores() {
-  try {
-    const data = JSON.parse(fs.readFileSync(scoresFilePath, "utf8"));
-    const map = new Map();
-    if (Array.isArray(data)) {
-      for (const entry of data) {
-        if (entry && entry.deviceId) {
-          map.set(entry.deviceId, {
-            name: entry.name || "",
-            points: entry.points || 0,
-            wins: entry.wins || 0,
-            games: entry.games || 0
-          });
-        }
-      }
-    }
-    return map;
-  } catch {
-    return new Map();
-  }
-}
-
-function getScoreEntry(deviceId, name) {
-  let entry = scoreboard.get(deviceId);
-  if (!entry) {
-    entry = { name: name || "", points: 0, wins: 0, games: 0 };
-    scoreboard.set(deviceId, entry);
-  }
-  if (name) {
-    entry.name = name;
-  }
-  return entry;
-}
+const scoreStore = createScoreStore(scoresFilePath);
+const clientRegistry = createClientRegistry({
+  clientTimeoutMs,
+  maximumPlayers,
+  onChange: updateStatus
+});
+const {
+  clientForPlayerId,
+  clientLabel,
+  clientsByDevice,
+  cleanupClients,
+  countInGameDevices,
+  countReadyDevices,
+  countSpectators,
+  getConnectedClients,
+  getReadyClients,
+  isColorTakenByOther,
+  registerClient,
+  sanitizeColor,
+  sanitizeDeviceName,
+  sanitizeId
+} = clientRegistry;
+const {
+  angleInsideSector,
+  angleToDirection,
+  clamp,
+  deltaAngle,
+  directionToAngle
+} = circleMath;
+const snapshotBuilder = createSnapshotBuilder({
+  clientsByDevice,
+  clientForPlayerId,
+  clientLabel,
+  countInGameDevices,
+  countReadyDevices,
+  countSpectators,
+  game,
+  lobbyChat,
+  ballSpeed,
+  maximumPlayers,
+  minimumPlayers,
+  pointsForPlayer
+});
+const {
+  buildDeviceList,
+  buildLobbyDeviceList,
+  buildSnapshot,
+  metaSignature
+} = snapshotBuilder;
 
 function awardPoints(player, amount) {
   const owner = clientForPlayerId(player.id);
   if (!owner) {
     return;
   }
-  getScoreEntry(owner.deviceId, clientLabel(owner)).points += amount;
-  scoresDirty = true;
+  scoreStore.award(owner.deviceId, clientLabel(owner), amount);
 }
 
 function pointsForPlayer(player) {
@@ -130,36 +143,7 @@ function pointsForPlayer(player) {
   if (!owner) {
     return 0;
   }
-  const entry = scoreboard.get(owner.deviceId);
-  return entry ? entry.points : 0;
-}
-
-function flushScores() {
-  if (!scoresDirty) {
-    return;
-  }
-  scoresDirty = false;
-  const data = Array.from(scoreboard.entries()).map(([deviceId, entry]) => ({
-    deviceId,
-    name: entry.name,
-    points: entry.points,
-    wins: entry.wins,
-    games: entry.games
-  }));
-  fs.writeFile(scoresFilePath, JSON.stringify(data, null, 2), () => {});
-}
-
-function buildScoreboard() {
-  return Array.from(scoreboard.values())
-    .filter((entry) => entry.games > 0 || entry.points > 0)
-    .sort((a, b) => b.points - a.points || b.wins - a.wins)
-    .slice(0, 10)
-    .map((entry) => ({
-      name: entry.name || "Anonyme",
-      points: entry.points,
-      wins: entry.wins,
-      games: entry.games
-    }));
+  return scoreStore.pointsForDevice(owner.deviceId);
 }
 
 socket.on("message", (buffer, remote) => {
@@ -245,7 +229,7 @@ socket.on("message", (buffer, remote) => {
     return;
   }
 
-  if (payload.type === "lobby") {
+  if (payload.type === "leave" || payload.type === "lobby") {
     leaveGameForClient(client);
     broadcastSnapshot();
     return;
@@ -290,71 +274,9 @@ http.createServer((req, res) => {
     status: game.status,
     devices: buildDeviceList(),
     lobbyDevices: buildLobbyDeviceList(),
-    scoreboard: buildScoreboard()
+    scoreboard: scoreStore.buildScoreboard()
   }));
 }).listen(HEALTH_PORT, "0.0.0.0");
-
-function registerClient(deviceId, deviceName, remote) {
-  const addressKey = `${remote.address}:${remote.port}`;
-  let client = clientsByDevice.get(deviceId);
-
-  if (!client) {
-    client = {
-      id: nextClientId++,
-      deviceId,
-      deviceName: deviceName || "Device",
-      displayName: "",
-      color: "",
-      address: remote.address,
-      port: remote.port,
-      playerId: 0,
-      ready: false,
-      spectator: false,
-      input: 0,
-      wantsReplay: false,
-      smashArmedUntil: 0,
-      smashCooldownUntil: 0,
-      lastSeen: Date.now()
-    };
-    clientsByDevice.set(deviceId, client);
-  }
-
-  client.deviceName = getUniqueDeviceName(deviceName || client.deviceName, client);
-  client.address = remote.address;
-  client.port = remote.port;
-  client.lastSeen = Date.now();
-  clientsByAddress.set(addressKey, client);
-  updateStatus();
-  return client;
-}
-
-function sanitizeId(value) {
-  return String(value || "").replace(/[^\w.-]/g, "").slice(0, 80);
-}
-
-function getUniqueDeviceName(deviceName, currentClient) {
-  const baseName = sanitizeDeviceName(deviceName) || "Device";
-  let sameTypeCount = 0;
-
-  for (const client of clientsByDevice.values()) {
-    if (client !== currentClient && sanitizeDeviceName(client.deviceName) === baseName) {
-      sameTypeCount++;
-    }
-  }
-
-  return sameTypeCount > 0 ? `${baseName} ${sameTypeCount + 1}` : baseName;
-}
-
-function sanitizeDeviceName(deviceName) {
-  return String(deviceName || "")
-    .replace(/[^\w .-]/g, "")
-    .trim()
-    .slice(0, 24);
-}
-
-function sanitizeColor(value) {
-  return String(value || "").replace(/[^0-9a-fA-F]/g, "").slice(0, 6);
-}
 
 function sanitizeChatText(value) {
   return String(value || "")
@@ -379,23 +301,6 @@ function postChatMessage(client, text) {
   while (lobbyChat.length > chatHistoryLimit) {
     lobbyChat.shift();
   }
-}
-
-// Vrai si un autre joueur connecté utilise déjà cette couleur (comparaison insensible à la casse).
-function isColorTakenByOther(color, self) {
-  const target = color.toLowerCase();
-  for (const client of getConnectedClients()) {
-    if (client !== self && !client.spectator && client.color && client.color.toLowerCase() === target) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function clientLabel(client) {
-  return client.displayName && client.displayName.length > 0
-    ? client.displayName
-    : (client.deviceName || "Device");
 }
 
 function joinGame(client) {
@@ -502,11 +407,31 @@ function returnToLobby() {
 }
 
 function leaveGameForClient(client) {
+  const leavingPlayer = client && client.playerId > 0
+    ? game.players[client.playerId - 1]
+    : null;
+
   client.ready = false;
   client.spectator = false;
   client.input = 0;
   client.wantsReplay = false;
   client.playerId = 0;
+
+  if (game.gameStarted && !game.gameOver && leavingPlayer) {
+    leavingPlayer.alive = false;
+    leavingPlayer.lives = 0;
+    leavingPlayer.input = 0;
+    redistributeAlivePlayers();
+  }
+
+  if (!game.gameStarted && !game.gameOver) {
+    if (getReadyClients().length === 0) {
+      game.lobbyOpen = false;
+      game.startDeadline = 0;
+    }
+    assignLobbyPlayers();
+    return;
+  }
 
   if (getReadyClients().length === 0) {
     game.lobbyOpen = false;
@@ -572,24 +497,13 @@ function beginMatch() {
   for (const player of game.players) {
     const owner = clientForPlayerId(player.id);
     if (owner) {
-      getScoreEntry(owner.deviceId, clientLabel(owner)).games += 1;
-      scoresDirty = true;
+      scoreStore.recordGame(owner.deviceId, clientLabel(owner));
     }
   }
 
   redistributeAlivePlayers();
   resetBall();
   updateStatus();
-}
-
-function getConnectedClients() {
-  return Array.from(clientsByDevice.values())
-    .filter((client) => Date.now() - client.lastSeen <= clientTimeoutMs)
-    .sort((a, b) => a.id - b.id);
-}
-
-function getReadyClients() {
-  return getConnectedClients().filter((client) => client.ready && !client.spectator).slice(0, maximumPlayers);
 }
 
 function rebuildPlayersForReadyClients(readyClients, preserveExistingPlayers) {
@@ -750,15 +664,6 @@ function updateStartCountdown() {
   updateStatus();
 }
 
-function cleanupClients() {
-  const now = Date.now();
-  for (const [deviceId, client] of clientsByDevice.entries()) {
-    if (now - client.lastSeen > clientTimeoutMs) {
-      clientsByDevice.delete(deviceId);
-    }
-  }
-}
-
 function reconcileGameState() {
   if (game.gameOver) {
     return;
@@ -772,24 +677,13 @@ function reconcileGameState() {
   }
 
   if (game.gameStarted) {
-    if (readyClients.length < minimumPlayers) {
+    if (readyClients.length === 0) {
       returnToLobby();
       return;
     }
 
-    let changed = readyClients.length !== game.players.length;
-    readyClients.forEach((client, index) => {
-      const expectedPlayerId = index + 1;
-      if (client.playerId !== expectedPlayerId) {
-        client.playerId = expectedPlayerId;
-        changed = true;
-      }
-    });
-
-    if (changed) {
-      rebuildPlayersForReadyClients(readyClients, true);
-      redistributeAlivePlayers();
-    }
+    updateStatus();
+    return;
   }
 
   updateStatus();
@@ -839,7 +733,12 @@ function updatePaddles(deltaTime) {
     }
 
     player.paddleAngle += player.input * paddleAngularSpeed * deltaTime;
-    player.paddleAngle = clampPaddleAngle(player.paddleAngle, player.sectorStartAngle, player.sectorEndAngle);
+    player.paddleAngle = circleMath.clampPaddleAngle(
+      player.paddleAngle,
+      player.sectorStartAngle,
+      player.sectorEndAngle,
+      paddleArcDegrees
+    );
   }
 }
 
@@ -944,24 +843,6 @@ function updateStatus() {
   game.status = "Waiting for someone to start a game";
 }
 
-function countInGameDevices() {
-  let count = 0;
-  for (const client of clientsByDevice.values()) {
-    if (client.ready && client.playerId > 0) {
-      count++;
-    }
-  }
-  return Math.min(count, maximumPlayers);
-}
-
-function countReadyDevices() {
-  return Math.min(getConnectedClients().filter((client) => client.ready && !client.spectator).length, maximumPlayers);
-}
-
-function countSpectators() {
-  return getConnectedClients().filter((client) => client.spectator).length;
-}
-
 function countReplayVotes() {
   let count = 0;
   for (const client of clientsByDevice.values()) {
@@ -974,32 +855,17 @@ function countReplayVotes() {
 
 function bounceOnPaddle(defender, impactAngle) {
   game.lastHitPlayerId = defender.id;
-  const impactDirection = angleToDirection(impactAngle); // radial sortant au point d'impact
-  const inwardX = -impactDirection.x;
-  const inwardY = -impactDirection.y;
+  const impactDirection = angleToDirection(impactAngle);
+  const nextDirection = ballRules.calculateBounceDirection(
+    { x: game.ballDirX, y: game.ballDirY },
+    defender.paddleAngle,
+    impactAngle,
+    paddleArcDegrees,
+    paddleAimInfluence
+  );
+  game.ballDirX = nextDirection.x;
+  game.ballDirY = nextDirection.y;
 
-  // Rebond propre : réflexion autour de la normale radiale AU POINT D'IMPACT (et non au
-  // centre de la raquette) → angle prévisible et toujours orienté vers l'intérieur.
-  const dot = game.ballDirX * inwardX + game.ballDirY * inwardY;
-  let dirX = game.ballDirX - 2 * dot * inwardX;
-  let dirY = game.ballDirY - 2 * dot * inwardY;
-
-  // "Effet" : pousse tangentiellement selon l'endroit touché sur la raquette (offset borné).
-  const offset = clamp(deltaAngle(defender.paddleAngle, impactAngle) / (paddleArcDegrees * 0.5), -1, 1);
-  const tangent = { x: -impactDirection.y, y: impactDirection.x };
-  dirX += tangent.x * offset * paddleAimInfluence;
-  dirY += tangent.y * offset * paddleAimInfluence;
-
-  // Garantit une vraie composante vers l'intérieur (anti-rasage du bord, plus de rebonds en chaîne).
-  const inwardDot = dirX * inwardX + dirY * inwardY;
-  if (inwardDot < 0.45) {
-    dirX += inwardX * (0.45 - inwardDot);
-    dirY += inwardY * (0.45 - inwardDot);
-  }
-
-  const length = Math.hypot(dirX, dirY) || 1;
-  game.ballDirX = dirX / length;
-  game.ballDirY = dirY / length;
   game.ballX = impactDirection.x * (arenaRadius - 0.12);
   game.ballY = impactDirection.y * (arenaRadius - 0.12);
 }
@@ -1015,8 +881,7 @@ function eliminatePlayer(player) {
     if (winner) {
       const owner = clientForPlayerId(winner.id);
       if (owner) {
-        getScoreEntry(owner.deviceId, clientLabel(owner)).wins += 1;
-        scoresDirty = true;
+        scoreStore.recordWin(owner.deviceId, clientLabel(owner));
       }
     }
     game.gameOver = true;
@@ -1027,7 +892,7 @@ function eliminatePlayer(player) {
     for (const client of clientsByDevice.values()) {
       client.wantsReplay = false;
     }
-    flushScores();
+    scoreStore.flush();
     updatePostGameStatus();
     return;
   }
@@ -1064,19 +929,18 @@ function redistributeAlivePlayers() {
       player.paddleAngle = sectorCenter;
       player.hasPaddleAngle = true;
     } else {
-      player.paddleAngle = clampPaddleAngle(player.paddleAngle, player.sectorStartAngle, player.sectorEndAngle);
+      player.paddleAngle = circleMath.clampPaddleAngle(
+        player.paddleAngle,
+        player.sectorStartAngle,
+        player.sectorEndAngle,
+        paddleArcDegrees
+      );
     }
   });
 }
 
 function findPlayerAtAngle(angle) {
   return game.players.find((player) => angleInsideSector(angle, player.sectorStartAngle, player.sectorEndAngle));
-}
-
-function angleInsideSector(angle, startAngle, endAngle) {
-  const center = lerpAngle(startAngle, endAngle, 0.5);
-  const halfSize = Math.abs(deltaAngle(startAngle, endAngle)) * 0.5;
-  return Math.abs(deltaAngle(center, angle)) <= halfSize;
 }
 
 function resetBall() {
@@ -1089,123 +953,6 @@ function resetBall() {
   game.ballSpeedMul = 1;
   game.ballDeadly = false;
   game.lastHitPlayerId = 0;
-}
-
-
-function buildSnapshot(client, full = true) {
-  const alivePlayerCount = game.players.filter((player) => player.alive).length;
-  const snapshot = {
-    type: "state",
-    localPlayerId: client && !client.spectator ? client.playerId : 0,
-    localIsSpectator: !!(client && client.spectator),
-    lobbyOpen: game.lobbyOpen,
-    connectedPlayerCount: countInGameDevices(),
-    readyPlayerCount: countReadyDevices(),
-    spectatorCount: countSpectators(),
-    playerCount: Math.max(minimumPlayers, Math.min(maximumPlayers, game.players.length)),
-    alivePlayerCount,
-    winnerId: game.winnerId,
-    gameStarted: game.gameStarted,
-    gameOver: game.gameOver,
-    replayVoteCount: game.replayVoteCount,
-    postGameRemainingSeconds: game.gameOver && game.postGameDeadline > 0
-      ? Math.max(0, Math.ceil((game.postGameDeadline - Date.now()) / 1000))
-      : 0,
-    startCountdownSeconds: (!game.gameStarted && !game.gameOver && game.startDeadline > 0)
-      ? Math.max(0, Math.ceil((game.startDeadline - Date.now()) / 1000))
-      : 0,
-    ballX: round(game.ballX),
-    ballY: round(game.ballY),
-    ballDirX: round(game.ballDirX),
-    ballDirY: round(game.ballDirY),
-    ballSpeed: round(ballSpeed * game.ballSpeedMul),
-    ballDeadly: game.ballDeadly,
-    raceActive: game.race.active,
-    raceWinnerId: game.race.winnerId,
-    raceWinnerName: game.race.winnerName,
-    raceRemainingMs: game.race.active ? Math.max(0, game.race.deadline - Date.now()) : 0,
-    players: game.players.map((player) => {
-      const owner = clientForPlayerId(player.id);
-      return {
-        id: player.id,
-        alive: player.alive,
-        lives: player.lives,
-        points: player.gamePoints || 0,
-        paddleAngle: round(player.paddleAngle),
-        input: round(player.input || 0),
-        name: full && owner ? clientLabel(owner) : "",
-        color: full && owner ? owner.color : ""
-      };
-    })
-  };
-
-  snapshot.chat = lobbyChat;
-
-  if (full) {
-    snapshot.status = game.status;
-    snapshot.devices = buildDeviceList();
-    snapshot.lobbyDevices = buildLobbyDeviceList();
-  }
-
-  return snapshot;
-}
-
-function metaSignature() {
-  const devs = buildDeviceList()
-    .map((d) => d.playerId + ":" + d.name + ":" + d.ready + ":" + d.color + ":" + d.lives + ":" + d.points)
-    .join("|");
-  const lobby = buildLobbyDeviceList()
-    .map((d) => d.name + ":" + d.color + ":" + d.spectator)
-    .join("|");
-  const identities = game.players
-    .map((p) => {
-      const owner = clientForPlayerId(p.id);
-      return p.id + ":" + (owner ? clientLabel(owner) : "") + ":" + (owner ? owner.color : "");
-    })
-    .join("|");
-  const chat = lobbyChat.length > 0 ? lobbyChat[lobbyChat.length - 1].id : 0;
-  return devs + "#" + lobby + "#" + identities + "#" + game.status
-    + "#" + game.lobbyOpen + game.gameStarted + game.gameOver + game.winnerId + "#" + chat;
-}
-
-function clientForPlayerId(playerId) {
-  for (const client of clientsByDevice.values()) {
-    if (client.playerId === playerId) {
-      return client;
-    }
-  }
-  return null;
-}
-
-function buildDeviceList() {
-  return Array.from(clientsByDevice.values())
-    .filter((client) => client.ready && client.playerId > 0)
-    .sort((a, b) => a.playerId - b.playerId)
-    .map((client) => {
-      const player = game.players[client.playerId - 1];
-      return {
-        playerId: client.playerId,
-        name: clientLabel(client),
-        ready: client.ready,
-        spectator: false,
-        color: client.color,
-        lives: player ? player.lives : 0,
-        points: player ? player.gamePoints || 0 : 0
-      };
-    });
-}
-
-function buildLobbyDeviceList() {
-  return Array.from(clientsByDevice.values())
-    .filter((client) => !client.ready || client.playerId <= 0)
-    .sort((a, b) => a.id - b.id)
-    .map((client) => ({
-      playerId: 0,
-      name: clientLabel(client),
-      ready: false,
-      spectator: !!client.spectator,
-      color: client.color
-    }));
 }
 
 let lastMetaSignature = "";
@@ -1230,53 +977,7 @@ function sendSnapshot(client, full = true) {
   socket.send(message, client.port, client.address);
 }
 
-function angleToDirection(angle) {
-  const radians = angle * Math.PI / 180;
-  return { x: Math.cos(radians), y: Math.sin(radians) };
-}
-
-function directionToAngle(x, y) {
-  const angle = Math.atan2(y, x) * 180 / Math.PI;
-  return angle < 0 ? angle + 360 : angle;
-}
-
-function clampPaddleAngle(angle, startAngle, endAngle) {
-  const center = lerpAngle(startAngle, endAngle, 0.5);
-  const sectorHalfSize = Math.abs(deltaAngle(startAngle, endAngle)) * 0.5;
-  const allowedHalfSize = Math.max(0, sectorHalfSize - paddleArcDegrees * 0.5);
-  const delta = clamp(deltaAngle(center, angle), -allowedHalfSize, allowedHalfSize);
-  return center + delta;
-}
-
-function lerpAngle(a, b, t) {
-  return a + deltaAngle(a, b) * t;
-}
-
-function deltaAngle(current, target) {
-  let delta = repeat((target - current), 360);
-  if (delta > 180) {
-    delta -= 360;
-  }
-  return delta;
-}
-
-function repeat(value, length) {
-  return clamp(value - Math.floor(value / length) * length, 0, length);
-}
-
-function clamp(value, min, max) {
-  return Math.min(max, Math.max(min, value));
-}
-
-function lerp(a, b, t) {
-  return a + (b - a) * t;
-}
-
-function round(value) {
-  return Math.round(value * 1000) / 1000;
-}
-
 assignLobbyPlayers();
 setInterval(tick, 1000 / 60);
 setInterval(broadcastSnapshot, 1000 / 30);
-setInterval(flushScores, 5000);
+setInterval(() => scoreStore.flush(), 5000);

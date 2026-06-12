@@ -13,7 +13,7 @@ public class PongCircleUdpClient : MonoBehaviour
 #if UNITY_EDITOR
     public string ServerHost = "127.0.0.1";
 #else
-    public string ServerHost = "pong.becop.fr";
+    public string ServerHost = "192.168.88.193";
 #endif
     public int ServerPort = 41234;
     public bool AutoConnect = true;

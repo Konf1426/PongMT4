@@ -18,6 +18,9 @@ function createSnapshotBuilder(options) {
 
   function buildSnapshot(client, full = true) {
     const alivePlayerCount = game.players.filter((player) => player.alive).length;
+    const localWinnerId = client && game.forfeitWinnerIds && game.forfeitWinnerIds.includes(client.playerId)
+      ? client.playerId
+      : game.winnerId;
     const snapshot = {
       type: "state",
       localPlayerId: client && !client.spectator ? client.playerId : 0,
@@ -28,7 +31,7 @@ function createSnapshotBuilder(options) {
       spectatorCount: countSpectators(),
       playerCount: Math.max(minimumPlayers, Math.min(maximumPlayers, game.players.length)),
       alivePlayerCount,
-      winnerId: game.winnerId,
+      winnerId: localWinnerId,
       gameStarted: game.gameStarted,
       gameOver: game.gameOver,
       replayVoteCount: game.replayVoteCount,

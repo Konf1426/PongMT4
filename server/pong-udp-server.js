@@ -390,7 +390,7 @@ function revivePlayer(player) {
   player.lives = startingLives;
   player.input = 0;
   player.hasPaddleAngle = false;
-  player.gamePoints = player.gamePoints || 0;
+  player.gamePoints = 0;
   game.winnerId = 0;
   game.forfeitWinnerIds = [];
   game.gameOver = false;

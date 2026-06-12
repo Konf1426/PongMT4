@@ -2,29 +2,29 @@ const circleMath = require("./circle-math");
 
 function calculateBounceDirection(ballDir, defenderPaddleAngle, impactAngle, paddleArcDegrees, paddleAimInfluence) {
   const impactDirection = circleMath.angleToDirection(impactAngle);
-  const paddleDirection = circleMath.angleToDirection(defenderPaddleAngle);
-  const dot = ballDir.x * paddleDirection.x + ballDir.y * paddleDirection.y;
-  let reflectedX = ballDir.x - 2 * dot * paddleDirection.x;
-  let reflectedY = ballDir.y - 2 * dot * paddleDirection.y;
+  const inward = { x: -impactDirection.x, y: -impactDirection.y };
 
-  const offset = circleMath.deltaAngle(defenderPaddleAngle, impactAngle) / Math.max(1, paddleArcDegrees * 0.5);
-  const tangent = { x: -paddleDirection.y, y: paddleDirection.x };
-  let aimedX = reflectedX + tangent.x * offset * paddleAimInfluence;
-  let aimedY = reflectedY + tangent.y * offset * paddleAimInfluence;
-  let length = Math.hypot(aimedX, aimedY) || 1;
-  aimedX /= length;
-  aimedY /= length;
+  const dot = ballDir.x * inward.x + ballDir.y * inward.y;
+  let dirX = ballDir.x - 2 * dot * inward.x;
+  let dirY = ballDir.y - 2 * dot * inward.y;
 
-  const antiImpactDot = aimedX * -impactDirection.x + aimedY * -impactDirection.y;
-  if (antiImpactDot < 0.15) {
-    aimedX = circleMath.lerp(aimedX, -impactDirection.x, 0.5);
-    aimedY = circleMath.lerp(aimedY, -impactDirection.y, 0.5);
-    length = Math.hypot(aimedX, aimedY) || 1;
-    aimedX /= length;
-    aimedY /= length;
+  const offset = circleMath.clamp(
+    circleMath.deltaAngle(defenderPaddleAngle, impactAngle) / (paddleArcDegrees * 0.5),
+    -1,
+    1
+  );
+  const tangent = { x: -impactDirection.y, y: impactDirection.x };
+  dirX += tangent.x * offset * paddleAimInfluence;
+  dirY += tangent.y * offset * paddleAimInfluence;
+
+  const inwardDot = dirX * inward.x + dirY * inward.y;
+  if (inwardDot < 0.45) {
+    dirX += inward.x * (0.45 - inwardDot);
+    dirY += inward.y * (0.45 - inwardDot);
   }
 
-  return { x: aimedX, y: aimedY };
+  const length = Math.hypot(dirX, dirY) || 1;
+  return { x: dirX / length, y: dirY / length };
 }
 
 function randomDirection() {

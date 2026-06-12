@@ -25,6 +25,8 @@ function createClientRegistry(options) {
         spectator: false,
         input: 0,
         wantsReplay: false,
+        smashArmedUntil: 0,
+        smashCooldownUntil: 0,
         lastSeen: Date.now()
       };
       clientsByDevice.set(deviceId, client);
@@ -93,6 +95,20 @@ function createClientRegistry(options) {
     return getConnectedClients().filter((client) => client.ready && !client.spectator).slice(0, maximumPlayers);
   }
 
+  function countInGameDevices() {
+    let count = 0;
+    for (const client of clientsByDevice.values()) {
+      if (client.ready && client.playerId > 0) {
+        count++;
+      }
+    }
+    return Math.min(count, maximumPlayers);
+  }
+
+  function countReadyDevices() {
+    return Math.min(getReadyClients().length, maximumPlayers);
+  }
+
   function countSpectators() {
     return getConnectedClients().filter((client) => client.spectator).length;
   }
@@ -121,6 +137,8 @@ function createClientRegistry(options) {
     clientsByAddress,
     clientsByDevice,
     cleanupClients,
+    countInGameDevices,
+    countReadyDevices,
     getConnectedClients,
     getReadyClients,
     countSpectators,

@@ -121,7 +121,7 @@ const snapshotBuilder = createSnapshotBuilder({
   ballSpeed,
   maximumPlayers,
   minimumPlayers,
-  pointsForPlayer
+  scoreStore
 });
 const {
   buildDeviceList,
@@ -130,20 +130,18 @@ const {
   metaSignature
 } = snapshotBuilder;
 
-function awardPoints(player, amount) {
-  const owner = clientForPlayerId(player.id);
-  if (!owner) {
-    return;
+function updateBestScores() {
+  for (const player of game.players) {
+    if (!player.gamePoints || player.gamePoints <= 0) continue;
+    const owner = clientForPlayerId(player.id);
+    if (!owner) continue;
+    scoreStore.updateBestScore(owner.deviceId, clientLabel(owner), player.gamePoints);
   }
-  scoreStore.award(owner.deviceId, clientLabel(owner), amount);
 }
 
-function pointsForPlayer(player) {
-  const owner = clientForPlayerId(player.id);
-  if (!owner) {
-    return 0;
-  }
-  return scoreStore.pointsForDevice(owner.deviceId);
+function topHighScore() {
+  const top = buildScoreboard()[0];
+  return top ? { name: top.name, score: top.bestScore } : { name: "", score: 0 };
 }
 
 socket.on("message", (buffer, remote) => {
@@ -878,12 +876,7 @@ function eliminatePlayer(player) {
   if (alivePlayers.length <= 1) {
     const winner = alivePlayers[0] || null;
     game.winnerId = winner ? winner.id : 0;
-    if (winner) {
-      const owner = clientForPlayerId(winner.id);
-      if (owner) {
-        scoreStore.recordWin(owner.deviceId, clientLabel(owner));
-      }
-    }
+    updateBestScores();
     game.gameOver = true;
     game.gameStarted = false;
     game.startDeadline = 0;

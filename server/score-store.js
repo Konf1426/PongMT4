@@ -7,72 +7,44 @@ function createScoreStore(filePath) {
   function getEntry(deviceId, name) {
     let entry = scores.get(deviceId);
     if (!entry) {
-      entry = { name: name || "", points: 0, wins: 0, games: 0 };
+      entry = { name: name || "", bestScore: 0 };
       scores.set(deviceId, entry);
     }
-    if (name) {
-      entry.name = name;
-    }
+    if (name) entry.name = name;
     return entry;
   }
 
-  function award(deviceId, name, amount) {
-    getEntry(deviceId, name).points += amount;
-    dirty = true;
-  }
-
-  function recordGame(deviceId, name) {
-    getEntry(deviceId, name).games += 1;
-    dirty = true;
-  }
-
-  function recordWin(deviceId, name) {
-    getEntry(deviceId, name).wins += 1;
-    dirty = true;
-  }
-
-  function pointsForDevice(deviceId) {
-    const entry = scores.get(deviceId);
-    return entry ? entry.points : 0;
+  function updateBestScore(deviceId, name, score) {
+    const entry = getEntry(deviceId, name);
+    if (score > entry.bestScore) {
+      entry.bestScore = score;
+      dirty = true;
+    }
   }
 
   function flush() {
-    if (!dirty) {
-      return;
-    }
+    if (!dirty) return;
     dirty = false;
-    const data = Array.from(scores.entries()).map(([deviceId, entry]) => ({
-      deviceId,
-      name: entry.name,
-      points: entry.points,
-      wins: entry.wins,
-      games: entry.games
-    }));
+    const data = Array.from(scores.entries())
+      .map(([deviceId, entry]) => ({ deviceId, name: entry.name, bestScore: entry.bestScore }))
+      .filter((e) => e.bestScore > 0)
+      .sort((a, b) => b.bestScore - a.bestScore)
+      .slice(0, 10);
     fs.writeFile(filePath, JSON.stringify(data, null, 2), () => {});
   }
 
   function buildScoreboard() {
     return Array.from(scores.values())
-      .filter((entry) => entry.games > 0 || entry.points > 0)
-      .sort((a, b) => b.points - a.points || b.wins - a.wins)
+      .filter((entry) => entry.bestScore > 0)
+      .sort((a, b) => b.bestScore - a.bestScore)
       .slice(0, 10)
       .map((entry) => ({
         name: entry.name || "Anonyme",
-        points: entry.points,
-        wins: entry.wins,
-        games: entry.games
+        bestScore: entry.bestScore
       }));
   }
 
-  return {
-    award,
-    buildScoreboard,
-    flush,
-    getEntry,
-    pointsForDevice,
-    recordGame,
-    recordWin
-  };
+  return { updateBestScore, buildScoreboard, flush, getEntry };
 }
 
 function loadScores(filePath) {
@@ -84,9 +56,7 @@ function loadScores(filePath) {
         if (entry && entry.deviceId) {
           scores.set(entry.deviceId, {
             name: entry.name || "",
-            points: entry.points || 0,
-            wins: entry.wins || 0,
-            games: entry.games || 0
+            bestScore: entry.bestScore || 0
           });
         }
       }

@@ -1112,8 +1112,7 @@ function buildSnapshot(client, full = true) {
     raceWinnerId: game.race.winnerId,
     raceWinnerName: game.race.winnerName,
     raceRemainingMs: game.race.active ? Math.max(0, game.race.deadline - Date.now()) : 0,
-    highScoreName: full ? topHighScore().name : undefined,
-    highScorePoints: full ? topHighScore().score : undefined,
+    highScores: full ? buildScoreboard().slice(0, 3).map((e) => ({ name: e.name, score: e.bestScore })) : undefined,
     players: game.players.map((player) => {
       const owner = clientForPlayerId(player.id);
       return {

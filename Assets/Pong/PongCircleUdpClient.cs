@@ -77,12 +77,8 @@ public class PongCircleUdpClient : MonoBehaviour
       get { return startCountdownSeconds; }
     }
 
-    public string HighScoreName {
-      get { return highScoreName; }
-    }
-
-    public int HighScorePoints {
-      get { return highScorePoints; }
+    public PongCircleHighScoreEntry[] HighScores {
+      get { return highScores; }
     }
 
     UdpClient udp;
@@ -117,8 +113,7 @@ public class PongCircleUdpClient : MonoBehaviour
     string chosenDisplayName = "";
     string chosenColorHex = "";
     string lastStatus = "UDP offline";
-    string highScoreName = "";
-    int highScorePoints = 0;
+    PongCircleHighScoreEntry[] highScores = new PongCircleHighScoreEntry[0];
     float nextHelloTime;
     float nextInputSendTime;
     float nextJoinRetryTime;
@@ -387,9 +382,8 @@ public class PongCircleUdpClient : MonoBehaviour
       replayVoteCount = snapshot.replayVoteCount;
       postGameRemainingSeconds = snapshot.postGameRemainingSeconds;
       startCountdownSeconds = snapshot.startCountdownSeconds;
-      if (!string.IsNullOrEmpty(snapshot.highScoreName)) {
-        highScoreName = snapshot.highScoreName;
-        highScorePoints = snapshot.highScorePoints;
+      if (snapshot.highScores != null && snapshot.highScores.Length > 0) {
+        highScores = snapshot.highScores;
       }
       if (snapshot.devices != null) {
         devices = snapshot.devices;

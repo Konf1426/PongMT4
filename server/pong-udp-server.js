@@ -489,16 +489,13 @@ function endMatchBecauseBelowMinimum(leavingPlayer) {
     client.spectator = false;
     client.input = 0;
     client.wantsReplay = false;
-    if (!winnerIds.includes(client.playerId)) {
-      client.playerId = 0;
-    }
   }
 
   game.lobbyOpen = true;
   game.gameStarted = false;
-  game.gameOver = false;
+  game.gameOver = true;
   game.replayVoteCount = 0;
-  game.postGameDeadline = 0;
+  game.postGameDeadline = Date.now() + 30000;
   game.startDeadline = 0;
   game.status = winners.length > 0
     ? `${formatForfeitWinners(winners)}: not enough players to continue`

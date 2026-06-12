@@ -228,8 +228,18 @@ socket.on("message", (buffer, remote) => {
     return;
   }
 
-  if (payload.type === "leave" || payload.type === "lobby") {
+  if (payload.type === "leave") {
     leaveGameForClient(client);
+    broadcastSnapshot();
+    return;
+  }
+
+  if (payload.type === "lobby") {
+    if (game.gameOver) {
+      returnToLobby();
+    } else {
+      leaveGameForClient(client);
+    }
     broadcastSnapshot();
     return;
   }

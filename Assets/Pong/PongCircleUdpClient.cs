@@ -303,8 +303,8 @@ public class PongCircleUdpClient : MonoBehaviour
       nextJoinRetryTime = 0;
       leaveRetryEndTime = Time.unscaledTime + 2f;
       nextLeaveRetryTime = 0;
-      lastStatus = "UDP leave sent";
-      SendLeave();
+      lastStatus = "UDP lobby sent";
+      SendLobby();
     }
 
     public void SendChatMessage(string text) {
@@ -483,7 +483,7 @@ public class PongCircleUdpClient : MonoBehaviour
       }
 
       nextLeaveRetryTime = Time.unscaledTime + 0.25f;
-      SendLeave();
+      SendLobby();
     }
 
     void SendHello() {
@@ -498,8 +498,8 @@ public class PongCircleUdpClient : MonoBehaviour
       SendMessage(PongCircleUdpProtocol.Simple("spectate"));
     }
 
-    void SendLeave() {
-      SendMessage(PongCircleUdpProtocol.Simple("leave"));
+    void SendLobby() {
+      SendMessage(PongCircleUdpProtocol.Simple("lobby"));
     }
 
     public void SendSmash() {

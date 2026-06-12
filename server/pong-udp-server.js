@@ -33,6 +33,7 @@ const joinGraceMs = 2000;
 const startCountdownMaxMs = 15000;  
 
 const startingLives = 3;
+const postGameDurationMs = 5000;
 const chatHistoryLimit = 30;
 const chatMessageMaxLength = 140;
 
@@ -484,21 +485,17 @@ function endMatchBecauseBelowMinimum(leavingPlayer) {
 
   updateBestScores();
 
+  
   for (const client of clientsByDevice.values()) {
-    client.ready = false;
-    client.spectator = false;
     client.input = 0;
     client.wantsReplay = false;
-    if (!winnerIds.includes(client.playerId)) {
-      client.playerId = 0;
-    }
   }
 
-  game.lobbyOpen = true;
+  game.lobbyOpen = false;
   game.gameStarted = false;
-  game.gameOver = false;
+  game.gameOver = true;
   game.replayVoteCount = 0;
-  game.postGameDeadline = 0;
+  game.postGameDeadline = Date.now() + postGameDurationMs;
   game.startDeadline = 0;
   game.status = winners.length > 0
     ? `${formatForfeitWinners(winners)}: not enough players to continue`

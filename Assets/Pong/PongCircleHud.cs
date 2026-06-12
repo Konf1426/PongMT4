@@ -281,8 +281,8 @@ public class PongCircleHud : MonoBehaviour
         bool started = Game.IsGameStarted;
         bool hasWinner = Game.WinnerId > 0;
 
-        bool showJoin = (network && !spectator && localId <= 0) || (network && !started && !hasWinner);
-        bool showWin = !showJoin && hasWinner;
+        bool showWin = hasWinner;
+        bool showJoin = !showWin && ((network && !spectator && localId <= 0) || (network && !started));
         bool showEliminated = !showJoin && !showWin && network && started && localId > 0 && !Game.IsLocalPlayerAlive;
         bool showLobby = !showJoin && !showWin && !showEliminated && !network && !started;
         bool showHud = !showJoin && !showWin && !showEliminated && !showLobby;

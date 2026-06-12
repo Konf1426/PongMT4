@@ -61,6 +61,7 @@ const game = {
   startDeadline: 0,
   countdownPlayerCount: 0,
   winnerId: 0,
+  forfeitWinnerIds: [],
   ballSpeedMul: 1,
   ballDeadly: false,
   nextDeadlyTime: 0,
@@ -324,6 +325,7 @@ function joinGame(client) {
   game.replayVoteCount = 0;
   game.postGameDeadline = 0;
   game.winnerId = 0;
+  game.forfeitWinnerIds = [];
   assignLobbyPlayers();
 }
 
@@ -380,6 +382,7 @@ function revivePlayer(player) {
   player.hasPaddleAngle = false;
   player.gamePoints = player.gamePoints || 0;
   game.winnerId = 0;
+  game.forfeitWinnerIds = [];
   game.gameOver = false;
   game.gameStarted = true;
   game.lobbyOpen = true;
@@ -404,6 +407,7 @@ function resetToLobby(requestingClient) {
   game.replayVoteCount = 0;
   game.postGameDeadline = 0;
   game.winnerId = 0;
+  game.forfeitWinnerIds = [];
   assignLobbyPlayers();
 }
 
@@ -422,6 +426,7 @@ function returnToLobby() {
   game.replayVoteCount = 0;
   game.postGameDeadline = 0;
   game.winnerId = 0;
+  game.forfeitWinnerIds = [];
   assignLobbyPlayers();
 }
 
@@ -463,7 +468,9 @@ function leaveGameForClient(client) {
 
 function endMatchBecauseBelowMinimum(leavingPlayer) {
   const winners = findForfeitWinners(leavingPlayer);
-  game.winnerId = winners.length > 0 ? winners[0].id : 0;
+  const winnerIds = winners.map((winner) => winner.id);
+  game.winnerId = winnerIds.length > 0 ? winnerIds[0] : 0;
+  game.forfeitWinnerIds = winnerIds;
 
   updateBestScores();
 
@@ -472,7 +479,9 @@ function endMatchBecauseBelowMinimum(leavingPlayer) {
     client.spectator = false;
     client.input = 0;
     client.wantsReplay = false;
-    client.playerId = 0;
+    if (!winnerIds.includes(client.playerId)) {
+      client.playerId = 0;
+    }
   }
 
   game.lobbyOpen = true;
@@ -532,6 +541,7 @@ function beginMatch() {
   game.postGameDeadline = 0;
   game.startDeadline = 0;
   game.winnerId = 0;
+  game.forfeitWinnerIds = [];
   game.ballDeadly = false;
   game.nextDeadlyTime = Date.now() + 4000;
   game.status = "Playing";

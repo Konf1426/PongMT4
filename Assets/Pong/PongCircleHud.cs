@@ -210,7 +210,7 @@ public class PongCircleHud : MonoBehaviour
         btnEliminatedReturn = root.Q<Button>("btn-eliminated-return");
         if (btnReplay != null) btnReplay.clicked += OnReplayClicked;
         if (btnReturn != null) btnReturn.clicked += OnReturnLobbyClicked;
-        if (btnEliminatedReturn != null) btnEliminatedReturn.clicked += OnReturnLobbyClicked;
+        if (btnEliminatedReturn != null) btnEliminatedReturn.clicked += OnJoinClicked;
 
         winScores = new Label();
         winScores.style.marginTop = 10;
@@ -301,6 +301,7 @@ public class PongCircleHud : MonoBehaviour
         if (showJoin) RefreshJoin(localId);
         else if (hudHighScores != null) hudHighScores.visible = false;
         if (showWin) RefreshWin(network);
+        if (showEliminated) RefreshEliminated();
         if (showLobby) RefreshLobby();
         if (showHud) RefreshHud(network);
 
@@ -344,13 +345,18 @@ public class PongCircleHud : MonoBehaviour
 
         SetText(joinHint, joinedPlayer
             ? "La partie se lance quand assez de joueurs ont rejoint."
-            : (Game.IsGameStarted ? "Choisis joueur pour entrer dans la partie, ou spectateur pour regarder." : "Tu es dans le menu tant que tu n'as pas rejoint la partie."));
+            : (Game.IsGameStarted ? "Choisis joueur pour entrer dans la partie, ou spectateur pour regarder." : Game.Status));
         RefreshHighScores();
 
         // Listes "En jeu" / "Lobby" masquées dans le menu d'accueil.
         // RebuildInGameDevices(joinDevices, ref sigJoinDevices);
         // RebuildLobbyDevices(joinLobbyDevices, ref sigJoinLobby);
         RefreshSwatchAvailability();
+    }
+
+    void RefreshEliminated()
+    {
+        SetText(btnEliminatedReturn, "Rejoindre la partie");
     }
 
     // --- Identité du joueur (nom + couleur de zone) ---

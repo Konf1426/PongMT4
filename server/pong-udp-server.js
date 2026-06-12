@@ -140,7 +140,7 @@ function updateBestScores() {
 }
 
 function topHighScore() {
-  const top = buildScoreboard()[0];
+  const top = scoreStore.buildScoreboard()[0];
   return top ? { name: top.name, score: top.bestScore } : { name: "", score: 0 };
 }
 
@@ -346,7 +346,7 @@ function spectateGame(client) {
   updateStatus();
 }
 
-function addReadyPlayerToRunningGame() {
+function addReadyPlayerToRunningGame(joiningClient) {
   const activeClients = getReadyClients();
   const previousPlayerCount = game.players.length;
   activeClients.forEach((readyClient, index) => {
@@ -361,8 +361,29 @@ function addReadyPlayerToRunningGame() {
     }
   }
 
+  if (joiningClient && joiningClient.playerId > 0) {
+    const player = game.players[joiningClient.playerId - 1];
+    if (player) {
+      revivePlayer(player);
+    }
+  }
+
   redistributeAlivePlayers();
+  resetBall();
   updateStatus();
+}
+
+function revivePlayer(player) {
+  player.alive = true;
+  player.lives = startingLives;
+  player.input = 0;
+  player.hasPaddleAngle = false;
+  player.gamePoints = player.gamePoints || 0;
+  game.winnerId = 0;
+  game.gameOver = false;
+  game.gameStarted = true;
+  game.lobbyOpen = true;
+  game.status = `Player ${player.id} rejoined`;
 }
 
 function resetToLobby(requestingClient) {
@@ -419,6 +440,12 @@ function leaveGameForClient(client) {
     leavingPlayer.alive = false;
     leavingPlayer.lives = 0;
     leavingPlayer.input = 0;
+
+    if (getReadyClients().length < minimumPlayers) {
+      endMatchBecauseBelowMinimum(leavingPlayer);
+      return;
+    }
+
     redistributeAlivePlayers();
   }
 
@@ -431,15 +458,45 @@ function leaveGameForClient(client) {
     return;
   }
 
-  if (getReadyClients().length === 0) {
-    game.lobbyOpen = false;
-    game.gameStarted = false;
-    game.gameOver = false;
-    game.replayVoteCount = 0;
-    game.postGameDeadline = 0;
-    game.winnerId = 0;
-  }
   updateStatus();
+}
+
+function endMatchBecauseBelowMinimum(leavingPlayer) {
+  const winners = findForfeitWinners(leavingPlayer);
+  game.winnerId = winners.length > 0 ? winners[0].id : 0;
+
+  updateBestScores();
+
+  for (const client of clientsByDevice.values()) {
+    client.ready = false;
+    client.spectator = false;
+    client.input = 0;
+    client.wantsReplay = false;
+    client.playerId = 0;
+  }
+
+  game.lobbyOpen = true;
+  game.gameStarted = false;
+  game.gameOver = false;
+  game.replayVoteCount = 0;
+  game.postGameDeadline = 0;
+  game.startDeadline = 0;
+  game.status = winners.length > 0
+    ? `${formatForfeitWinners(winners)}: not enough players to continue`
+    : "Game stopped: not enough players to continue";
+  scoreStore.flush();
+}
+
+function findForfeitWinners(leavingPlayer) {
+  const readyPlayerIds = new Set(getReadyClients().map((client) => client.playerId));
+  return game.players.filter((player) => player !== leavingPlayer && readyPlayerIds.has(player.id));
+}
+
+function formatForfeitWinners(players) {
+  if (players.length === 1) {
+    return `Player ${players[0].id} wins by forfeit`;
+  }
+  return `Players ${players.map((player) => player.id).join(", ")} win by forfeit`;
 }
 
 function assignLobbyPlayers() {
@@ -495,7 +552,7 @@ function beginMatch() {
   for (const player of game.players) {
     const owner = clientForPlayerId(player.id);
     if (owner) {
-      scoreStore.recordGame(owner.deviceId, clientLabel(owner));
+      scoreStore.getEntry(owner.deviceId, clientLabel(owner));
     }
   }
 
@@ -675,8 +732,8 @@ function reconcileGameState() {
   }
 
   if (game.gameStarted) {
-    if (readyClients.length === 0) {
-      returnToLobby();
+    if (readyClients.length < minimumPlayers) {
+      endMatchBecauseBelowMinimum(null);
       return;
     }
 
@@ -823,6 +880,10 @@ function updateStatus() {
     return;
   }
 
+  if (!game.gameStarted && game.winnerId > 0) {
+    return;
+  }
+
   if (game.gameStarted) {
     game.status = `Playing ${game.connectedPlayerCount}/${maximumPlayers} players`;
     return;
@@ -871,28 +932,19 @@ function bounceOnPaddle(defender, impactAngle) {
 function eliminatePlayer(player) {
   player.alive = false;
 
-  const alivePlayers = game.players.filter((candidate) => candidate.alive);
-
-  if (alivePlayers.length <= 1) {
-    const winner = alivePlayers[0] || null;
-    game.winnerId = winner ? winner.id : 0;
-    updateBestScores();
-    game.gameOver = true;
-    game.gameStarted = false;
-    game.startDeadline = 0;
-    game.replayVoteCount = 0;
-    game.postGameDeadline = Date.now() + 30000;
-    for (const client of clientsByDevice.values()) {
-      client.wantsReplay = false;
-    }
-    scoreStore.flush();
-    updatePostGameStatus();
+  if (countAliveReadyPlayers() < minimumPlayers) {
+    endMatchBecauseBelowMinimum(null);
     return;
   }
 
   game.status = `Player ${player.id} eliminated`;
   redistributeAlivePlayers();
   resetBall();
+}
+
+function countAliveReadyPlayers() {
+  const readyPlayerIds = new Set(getReadyClients().map((client) => client.playerId));
+  return game.players.filter((player) => readyPlayerIds.has(player.id) && player.alive).length;
 }
 
 function updatePostGameStatus() {

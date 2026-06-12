@@ -94,6 +94,7 @@ public class PongCircleUdpClient : MonoBehaviour
     bool stopping;
     bool lobbyOpen;
     bool localIsSpectator;
+    bool localPlayerAlive;
     int localPlayerId;
     int connectedPlayerCount;
     int readyPlayerCount;
@@ -270,12 +271,15 @@ public class PongCircleUdpClient : MonoBehaviour
       joinRetryEndTime = Time.unscaledTime + 10f;
       nextJoinRetryTime = 0;
       lastSnapshotTime = Time.unscaledTime;
-      lastStatus = "UDP join sent to " + ServerHost + ":" + ServerPort;
+      lastStatus = localPlayerId > 0 && !localPlayerAlive
+        ? "UDP rejoin sent to " + ServerHost + ":" + ServerPort
+        : "UDP join sent to " + ServerHost + ":" + ServerPort;
       SendJoin();
     }
 
     public void SendSpectateGame() {
       localIsSpectator = true;
+      localPlayerAlive = false;
       localPlayerId = 0;
       joinRetryEndTime = 0;
       nextJoinRetryTime = 0;
@@ -293,6 +297,7 @@ public class PongCircleUdpClient : MonoBehaviour
 
     public void SendReturnLobby() {
       localIsSpectator = false;
+      localPlayerAlive = false;
       localPlayerId = 0;
       joinRetryEndTime = 0;
       nextJoinRetryTime = 0;
@@ -385,6 +390,7 @@ public class PongCircleUdpClient : MonoBehaviour
 
       localPlayerId = snapshot.localPlayerId;
       localIsSpectator = snapshot.localIsSpectator;
+      localPlayerAlive = IsLocalPlayerAliveInSnapshot(snapshot);
       lastSnapshotTime = Time.unscaledTime;
       lobbyOpen = snapshot.lobbyOpen;
       connectedPlayerCount = snapshot.connectedPlayerCount;
@@ -413,21 +419,25 @@ public class PongCircleUdpClient : MonoBehaviour
         lastStatus = localPlayerId > 0 ? "UDP player " + localPlayerId : "UDP lobby";
       }
 
-      if (localPlayerId > 0 || localIsSpectator) {
+      EnsureCircleGame();
+      if (CircleGame != null) {
+        CircleGame.ApplyNetworkSnapshot(snapshot);
+      }
+
+      if ((localPlayerId > 0 && localPlayerAlive) || localIsSpectator) {
         joinRetryEndTime = 0;
       }
       if (localPlayerId <= 0 && !localIsSpectator) {
         leaveRetryEndTime = 0;
       }
-
-      EnsureCircleGame();
-      if (CircleGame != null) {
-        CircleGame.ApplyNetworkSnapshot(snapshot);
-      }
     }
 
     void RetryJoinIfNeeded() {
-      if (joinRetryEndTime <= 0 || localPlayerId > 0 || localIsSpectator) {
+      if (joinRetryEndTime <= 0 || localIsSpectator) {
+        return;
+      }
+
+      if (localPlayerId > 0 && localPlayerAlive) {
         return;
       }
 
@@ -442,6 +452,20 @@ public class PongCircleUdpClient : MonoBehaviour
 
       nextJoinRetryTime = Time.unscaledTime + 0.5f;
       SendJoin();
+    }
+
+    static bool IsLocalPlayerAliveInSnapshot(PongCircleNetworkSnapshot snapshot) {
+      if (snapshot == null || snapshot.localPlayerId <= 0 || snapshot.players == null) {
+        return false;
+      }
+
+      foreach (PongCircleNetworkPlayerState player in snapshot.players) {
+        if (player != null && player.id == snapshot.localPlayerId) {
+          return player.alive;
+        }
+      }
+
+      return false;
     }
 
     void RetryLeaveIfNeeded() {

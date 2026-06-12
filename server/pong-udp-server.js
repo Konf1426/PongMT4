@@ -611,6 +611,12 @@ function rebuildPlayersForReadyClients(readyClients, preserveExistingPlayers) {
   }
 }
 
+function restoreReadyForReplay() {
+  for (const c of clientsByDevice.values()) {
+    if (c.playerId > 0) c.ready = true;
+  }
+}
+
 function voteReplay(client) {
   if (!game.gameOver || !client || client.playerId <= 0) {
     return;
@@ -619,6 +625,7 @@ function voteReplay(client) {
   client.wantsReplay = true;
   game.replayVoteCount = countReplayVotes();
   if (game.replayVoteCount >= minimumPlayers) {
+    restoreReadyForReplay();
     beginMatch();
     return;
   }
@@ -768,6 +775,7 @@ function updatePostGameTimeout() {
 
   game.replayVoteCount = countReplayVotes();
   if (game.replayVoteCount >= minimumPlayers) {
+    restoreReadyForReplay();
     beginMatch();
     broadcastSnapshot();
     return;

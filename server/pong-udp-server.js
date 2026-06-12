@@ -508,7 +508,7 @@ function endMatchBecauseBelowMinimum(leavingPlayer) {
 
 function findForfeitWinners(leavingPlayer) {
   const readyPlayerIds = new Set(getReadyClients().map((client) => client.playerId));
-  return game.players.filter((player) => player !== leavingPlayer && readyPlayerIds.has(player.id));
+  return game.players.filter((player) => player !== leavingPlayer && player.alive && readyPlayerIds.has(player.id));
 }
 
 function formatForfeitWinners(players) {

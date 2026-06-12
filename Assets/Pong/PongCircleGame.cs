@@ -572,6 +572,9 @@ public class PongCircleGame : MonoBehaviour
       if (renderer.material.HasProperty("_BaseColor")) {
         renderer.material.SetColor("_BaseColor", color);
       }
+      if (renderer.material.HasProperty("_EmissionColor")) {
+        renderer.material.SetColor("_EmissionColor", color.linear * 2.5f);
+      }
 
       if (EnableJuice && ((smash && !wasSmashing) || (deadly && !wasDeadly))) {
         Juice.AddShake(deadly ? 0.16f : 0.12f);

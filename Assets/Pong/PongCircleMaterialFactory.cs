@@ -10,6 +10,7 @@ public static class PongCircleMaterialFactory
     public static Material Create(Color color, float emission)
     {
       Material material = new Material(ResolveShader("Universal Render Pipeline/Lit", "Standard"));
+      material.hideFlags = HideFlags.HideAndDontSave;
       material.color = color;
       if (material.HasProperty("_BaseColor")) {
         material.SetColor("_BaseColor", color);
@@ -41,6 +42,7 @@ public static class PongCircleMaterialFactory
     public static Material CreateUnlitHdr(Color color, float intensity)
     {
       Material material = new Material(ResolveShader("Universal Render Pipeline/Unlit", "Unlit/Color"));
+      material.hideFlags = HideFlags.HideAndDontSave;
       Color hdr = color.linear * intensity;
       if (material.HasProperty("_BaseColor")) {
         material.SetColor("_BaseColor", hdr);

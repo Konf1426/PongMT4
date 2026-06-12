@@ -113,6 +113,8 @@ public class PongCircleUdpClient : MonoBehaviour
     float nextInputSendTime;
     float nextJoinRetryTime;
     float joinRetryEndTime;
+    float nextLeaveRetryTime;
+    float leaveRetryEndTime;
     float lastSnapshotTime;
     float onScreenDirection;
     float onScreenDirectionTime;
@@ -148,6 +150,7 @@ public class PongCircleUdpClient : MonoBehaviour
       }
 
       RetryJoinIfNeeded();
+      RetryLeaveIfNeeded();
 
       if (joinRetryEndTime > 0 && localPlayerId <= 0 && Time.unscaledTime - lastSnapshotTime > 3f) {
         lastStatus = "UDP waiting for server response";
@@ -287,7 +290,10 @@ public class PongCircleUdpClient : MonoBehaviour
       localPlayerId = 0;
       joinRetryEndTime = 0;
       nextJoinRetryTime = 0;
-      SendMessage(PongCircleUdpProtocol.Simple("leave"));
+      leaveRetryEndTime = Time.unscaledTime + 2f;
+      nextLeaveRetryTime = 0;
+      lastStatus = "UDP leave sent";
+      SendLeave();
     }
 
     public void SendChatMessage(string text) {
@@ -401,6 +407,9 @@ public class PongCircleUdpClient : MonoBehaviour
       if (localPlayerId > 0 || localIsSpectator) {
         joinRetryEndTime = 0;
       }
+      if (localPlayerId <= 0 && !localIsSpectator) {
+        leaveRetryEndTime = 0;
+      }
 
       EnsureCircleGame();
       if (CircleGame != null) {
@@ -426,6 +435,24 @@ public class PongCircleUdpClient : MonoBehaviour
       SendJoin();
     }
 
+    void RetryLeaveIfNeeded() {
+      if (leaveRetryEndTime <= 0) {
+        return;
+      }
+
+      if (Time.unscaledTime > leaveRetryEndTime) {
+        leaveRetryEndTime = 0;
+        return;
+      }
+
+      if (Time.unscaledTime < nextLeaveRetryTime) {
+        return;
+      }
+
+      nextLeaveRetryTime = Time.unscaledTime + 0.25f;
+      SendLeave();
+    }
+
     void SendHello() {
       SendMessage(PongCircleUdpProtocol.Hello(deviceId, deviceName));
     }
@@ -436,6 +463,10 @@ public class PongCircleUdpClient : MonoBehaviour
 
     void SendSpectate() {
       SendMessage(PongCircleUdpProtocol.Simple("spectate"));
+    }
+
+    void SendLeave() {
+      SendMessage(PongCircleUdpProtocol.Simple("leave"));
     }
 
     public void SendSmash() {

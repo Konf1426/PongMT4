@@ -17,7 +17,7 @@ public class PongCircleHud : MonoBehaviour
     VisualElement panelJoin, panelLobby, panelHud, panelWin, panelEliminated, mobileControls, controlsHelp, lobbyChat, chatMessages;
 
     // Join panel
-    Button btnJoin, btnSpectate;
+    Button btnJoin, btnCancelJoin, btnSpectate;
     Label joinTitle, joinSubtitle, joinYourPlayer, joinNetwork, joinPlayers, joinMin, joinHint, joinCountdown;
     VisualElement joinDevices, joinLobbyDevices, joinIdentity;
 
@@ -102,6 +102,8 @@ public class PongCircleHud : MonoBehaviour
         joinIdentity = root.Q<VisualElement>("join-identity");
         btnJoin = root.Q<Button>("btn-join");
         if (btnJoin != null) btnJoin.clicked += OnJoinClicked;
+        btnCancelJoin = root.Q<Button>("btn-cancel-join");
+        if (btnCancelJoin != null) btnCancelJoin.clicked += OnReturnLobbyClicked;
         btnSpectate = root.Q<Button>("btn-spectate");
         if (btnSpectate != null) btnSpectate.clicked += OnSpectateClicked;
 
@@ -290,7 +292,8 @@ public class PongCircleHud : MonoBehaviour
         Show(joinTitle, !showCountdown);
         Show(joinSubtitle, !showCountdown);
         Show(joinIdentity, !showCountdown);
-        Show(btnJoin, !showCountdown);
+        Show(btnJoin, !showCountdown && !joinedPlayer);
+        Show(btnCancelJoin, joinedPlayer && !Game.IsGameStarted);
         Show(joinNetwork, !showCountdown);
         Show(joinPlayers, !showCountdown);
         Show(joinHint, !showCountdown);
@@ -464,6 +467,7 @@ public class PongCircleHud : MonoBehaviour
 
         RebuildInGameDevices(hudDevices, ref sigHudDevices);
         RebuildLobbyDevices(hudLobbyDevices, ref sigHudLobby);
+        SetText(btnRestart, network ? "Retour lobby" : "Relancer");
         RefreshRace();
     }
 
@@ -740,7 +744,7 @@ public class PongCircleHud : MonoBehaviour
                 if (ShouldUseUdp()) Udp.Connect();
                 return;
             }
-            if (ShouldUseUdp()) Udp.SendRestartLobby();
+            if (ShouldUseUdp()) Udp.SendReturnLobby();
         }
         else if (Game != null)
         {

@@ -314,8 +314,10 @@ public class PongCircleHud : MonoBehaviour
         string hint = joinedPlayer
             ? "La partie se lance quand assez de joueurs ont rejoint."
             : (Game.IsGameStarted ? "Choisis joueur pour entrer dans la partie, ou spectateur pour regarder." : "Tu es dans le menu tant que tu n'as pas rejoint la partie.");
-        if (ShouldUseUdp() && Udp.HighScorePoints > 0)
-            hint += "\nRecord : " + Udp.HighScoreName + " — " + Udp.HighScorePoints + " pts";
+        if (ShouldUseUdp())
+            hint += Udp.HighScorePoints > 0
+                ? "\nRecord : " + Udp.HighScoreName + " — " + Udp.HighScorePoints + " pts"
+                : "\nRecord : Aucune partie jouée";
         SetText(joinHint, hint);
 
         // Listes "En jeu" / "Lobby" masquées dans le menu d'accueil.

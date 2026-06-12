@@ -620,7 +620,7 @@ public class PongCircleGame : MonoBehaviour
         if (MouseControlEnabled && i == LocalPlayerIndex && TryReadMouseAngle(out float mouseAngle)) {
           player.PaddleAngle = ClampPaddleAngle(mouseAngle, player.SectorStartAngle, player.SectorEndAngle);
         } else {
-          float direction = ReadLocalDirection(i);
+          float direction = ReadLocalDirection(i) * SectorInputSign(player);
           player.PaddleAngle += direction * PaddleAngularSpeed * Time.deltaTime;
           player.PaddleAngle = ClampPaddleAngle(player.PaddleAngle, player.SectorStartAngle, player.SectorEndAngle);
         }
@@ -808,6 +808,19 @@ public class PongCircleGame : MonoBehaviour
       }
 
       return null;
+    }
+
+    static float SectorInputSign(CirclePlayer player)
+    {
+      float center = Mathf.LerpAngle(player.SectorStartAngle, player.SectorEndAngle, 0.5f);
+      center = ((center % 360f) + 360f) % 360f;
+      return (center > 90f && center < 270f) ? -1f : 1f;
+    }
+
+    public float GetLocalInputSign()
+    {
+      CirclePlayer p = FindPlayerById(networkLocalPlayerId);
+      return p != null ? SectorInputSign(p) : 1f;
     }
 
     CirclePlayer FindPlayerById(int playerId) {

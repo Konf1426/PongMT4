@@ -175,6 +175,7 @@ public class PongCircleUdpClient : MonoBehaviour
 
       EnsureCircleGame();
       if (CircleGame != null) {
+        direction *= CircleGame.GetLocalInputSign();
         CircleGame.SetLocalPredictedInput(direction);
       }
 

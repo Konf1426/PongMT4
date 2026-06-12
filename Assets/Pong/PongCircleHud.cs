@@ -30,7 +30,7 @@ public class PongCircleHud : MonoBehaviour
     // In-game HUD panel
     Button btnRestart;
     Label hudLocalStats, hudPlayers, hudAlive, hudStatus, hudNetwork, hudRace;
-    VisualElement hudDevices, hudLobbyDevices, hudPlayerBars;
+    VisualElement hudDevices, hudLobbyDevices, hudPlayerBars, hudHighScores;
 
     // Win panel
     Button btnReplay, btnReturn, btnEliminatedReturn;
@@ -175,6 +175,31 @@ public class PongCircleHud : MonoBehaviour
         hudPlayerBars.visible = false;
         root.Add(hudPlayerBars);
 
+        hudHighScores = new VisualElement();
+        hudHighScores.style.position = Position.Absolute;
+        hudHighScores.style.top = 24;
+        hudHighScores.style.right = 24;
+        hudHighScores.style.width = 220;
+        hudHighScores.style.backgroundColor = new StyleColor(new Color(0.04f, 0.06f, 0.09f, 0.96f));
+        hudHighScores.style.borderTopLeftRadius = 12;
+        hudHighScores.style.borderTopRightRadius = 12;
+        hudHighScores.style.borderBottomLeftRadius = 12;
+        hudHighScores.style.borderBottomRightRadius = 12;
+        hudHighScores.style.borderTopWidth = 1;
+        hudHighScores.style.borderBottomWidth = 1;
+        hudHighScores.style.borderLeftWidth = 1;
+        hudHighScores.style.borderRightWidth = 1;
+        hudHighScores.style.borderTopColor = new StyleColor(new Color(1f, 0.84f, 0f, 0.5f));
+        hudHighScores.style.borderBottomColor = new StyleColor(new Color(1f, 0.84f, 0f, 0.5f));
+        hudHighScores.style.borderLeftColor = new StyleColor(new Color(1f, 0.84f, 0f, 0.5f));
+        hudHighScores.style.borderRightColor = new StyleColor(new Color(1f, 0.84f, 0f, 0.5f));
+        hudHighScores.style.paddingTop = 14;
+        hudHighScores.style.paddingBottom = 14;
+        hudHighScores.style.paddingLeft = 16;
+        hudHighScores.style.paddingRight = 16;
+        hudHighScores.visible = false;
+        root.Add(hudHighScores);
+
         // Win
         winTitle = root.Q<Label>("win-title");
         winSubtitle = root.Q<Label>("win-subtitle");
@@ -274,6 +299,7 @@ public class PongCircleHud : MonoBehaviour
         Show(mobileControls, showMobile);
 
         if (showJoin) RefreshJoin(localId);
+        else if (hudHighScores != null) hudHighScores.visible = false;
         if (showWin) RefreshWin(network);
         if (showEliminated) RefreshEliminated();
         if (showLobby) RefreshLobby();
@@ -320,6 +346,7 @@ public class PongCircleHud : MonoBehaviour
         SetText(joinHint, joinedPlayer
             ? "La partie se lance quand assez de joueurs ont rejoint."
             : (Game.IsGameStarted ? "Choisis joueur pour entrer dans la partie, ou spectateur pour regarder." : Game.Status));
+        RefreshHighScores();
 
         // Listes "En jeu" / "Lobby" masquées dans le menu d'accueil.
         // RebuildInGameDevices(joinDevices, ref sigJoinDevices);
@@ -480,6 +507,58 @@ public class PongCircleHud : MonoBehaviour
     void RefreshLocalStats()
     {
         Show(hudLocalStats, false);
+    }
+
+    void RefreshHighScores()
+    {
+        if (hudHighScores == null) return;
+        if (!ShouldUseUdp()) { hudHighScores.visible = false; return; }
+
+        hudHighScores.visible = true;
+        hudHighScores.Clear();
+
+        Label title = new Label("MEILLEURS SCORES");
+        title.style.fontSize = 13;
+        title.style.unityFontStyleAndWeight = FontStyle.Bold;
+        title.style.color = new StyleColor(new Color(1f, 0.84f, 0f));
+        title.style.unityTextAlign = TextAnchor.UpperCenter;
+        title.style.marginBottom = 10;
+        hudHighScores.Add(title);
+
+        PongCircleHighScoreEntry[] scores = Udp.HighScores;
+        string[] medals = { "🥇", "🥈", "🥉" };
+
+        if (scores == null || scores.Length == 0)
+        {
+            Label empty = new Label("Aucune partie jouée");
+            empty.style.fontSize = 13;
+            empty.style.color = new StyleColor(new Color(0.6f, 0.7f, 0.8f));
+            empty.style.unityTextAlign = TextAnchor.UpperCenter;
+            hudHighScores.Add(empty);
+            return;
+        }
+
+        for (int i = 0; i < scores.Length; i++)
+        {
+            VisualElement row = new VisualElement();
+            row.style.flexDirection = FlexDirection.Row;
+            row.style.justifyContent = Justify.SpaceBetween;
+            row.style.marginTop = 4;
+
+            Label left = new Label(medals[i] + " " + (scores[i].name ?? "???"));
+            left.style.fontSize = 15;
+            left.style.unityFontStyleAndWeight = i == 0 ? FontStyle.Bold : FontStyle.Normal;
+            left.style.color = new StyleColor(new Color(0.9f, 0.95f, 1f));
+
+            Label right = new Label(scores[i].score + " pts");
+            right.style.fontSize = 15;
+            right.style.unityFontStyleAndWeight = FontStyle.Bold;
+            right.style.color = new StyleColor(new Color(0.35f, 0.9f, 0.78f));
+
+            row.Add(left);
+            row.Add(right);
+            hudHighScores.Add(row);
+        }
     }
 
     void RefreshRace()

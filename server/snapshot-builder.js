@@ -13,7 +13,7 @@ function createSnapshotBuilder(options) {
     ballSpeed,
     maximumPlayers,
     minimumPlayers,
-    pointsForPlayer
+    scoreStore
   } = options;
 
   function buildSnapshot(client, full = true) {
@@ -48,13 +48,14 @@ function createSnapshotBuilder(options) {
       raceWinnerId: game.race.winnerId,
       raceWinnerName: game.race.winnerName,
       raceRemainingMs: game.race.active ? Math.max(0, game.race.deadline - Date.now()) : 0,
+      highScores: full ? scoreStore.buildScoreboard().slice(0, 3).map((e) => ({ name: e.name, score: e.bestScore })) : undefined,
       players: game.players.map((player) => {
         const owner = clientForPlayerId(player.id);
         return {
           id: player.id,
           alive: player.alive,
           lives: player.lives,
-          points: pointsForPlayer(player),
+          points: player.gamePoints || 0,
           paddleAngle: circleMath.round(player.paddleAngle),
           input: circleMath.round(player.input || 0),
           name: full && owner ? clientLabel(owner) : "",
